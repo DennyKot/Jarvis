@@ -1,0 +1,414 @@
+﻿using System.ComponentModel;
+using System.Text;
+using System.Text.Json;
+using Jarvis.Core.Configuration;
+using Jarvis.Core.Safety;
+using Jarvis.Core.Tools;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Microsoft.Playwright;
+
+namespace Jarvis.Automation.Browser;
+
+public sealed class BrowserToolProvider(
+    ChromeSession session,
+    IPointerService pointer,
+    IWindowActivator windows,
+    IActionGuard guard,
+    RiskPolicy riskPolicy,
+    IOptions<JarvisOptions> options,
+    ILogger<BrowserToolProvider> logger) : IToolProvider
+{
+    private const float ActionTimeoutMs = 8000;
+
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<IPage, PageSnapshot> _snapshots = new();
+
+    private BrowserOptions Options => options.Value.Browser;
+
+    private sealed record PageSnapshot(string Url, IReadOnlyList<string> Lines);
+
+    // Other modes get their browser_* tools from the desktop (UserWindow) or extension provider.
+    public IEnumerable<JarvisTool> GetTools() => Options.Mode == BrowserMode.JarvisProfile ? AllTools() : [];
+
+    private IEnumerable<JarvisTool> AllTools() =>
+    [
+        JarvisTool.Create(OpenAsync, "browser_open", "Open URL in Chrome. Returns page snapshot."),
+        JarvisTool.Create(SnapshotAsync, "browser_snapshot",
+            "Full snapshot of current page: elements with refs [eN] + text.", ToolRisk.ReadOnly),
+        JarvisTool.Create(ClickAsync, "browser_click", "Click page element by ref.", ToolRisk.Action, "element"),
+        JarvisTool.Create(TypeAsync, "browser_type", "Type into field by ref.", ToolRisk.Action, "element"),
+        JarvisTool.Create(SelectOptionAsync, "browser_select_option", "Choose <select> option by ref.", ToolRisk.Action, "element"),
+        JarvisTool.Create(PressAsync, "browser_press",
+            "Press key in page, e.g. 'Enter', 'Control+A'."),
+        JarvisTool.Create(ScrollAsync, "browser_scroll", "Scroll page."),
+        JarvisTool.Create(BackAsync, "browser_back", "Go back in history."),
+        JarvisTool.Create(ReadTextAsync, "browser_read_text",
+            "Read page text (or one element by ref).", ToolRisk.ReadOnly),
+        JarvisTool.Create(TabsAsync, "browser_tabs", "List/switch/new/close tabs."),
+    ];
+
+    private async Task<string> OpenAsync(
+        [Description("URL")] string url,
+        [Description("Open in a new tab.")] bool newTab = false,
+        CancellationToken cancellationToken = default)
+    {
+        url = NormalizeUrl(url);
+
+        var page = newTab ? await session.NewPageAsync(cancellationToken) : await session.GetActivePageAsync(cancellationToken);
+        await page.BringToFrontAsync();
+        await ActivateChromeWindowAsync(page);
+        await page.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 30000 });
+        await SettleAsync(page);
+        return await DescribePageAsync(page, "Opened " + page.Url, full: true);
+    }
+
+    private async Task<string> SnapshotAsync(CancellationToken cancellationToken = default)
+    {
+        var page = await session.GetActivePageAsync(cancellationToken);
+        return await DescribePageAsync(page, null, full: true);
+    }
+
+    private async Task<string> ClickAsync(
+        [Description("ref, e.g. e12")] string @ref,
+        [Description("What it is, e.g. Search button")] string element,
+        [Description("Double-click.")] bool doubleClick = false,
+        CancellationToken cancellationToken = default)
+    {
+        var page = await session.GetActivePageAsync(cancellationToken);
+        var locator = await ResolveAsync(page, @ref);
+        await GuardRealNameAsync(locator, element, cancellationToken);
+        await PointAtAsync(page, locator, doubleClick ? PointerAction.DoubleClick : PointerAction.Click, element, cancellationToken);
+
+        var pagesBefore = page.Context.Pages.Count;
+        if (doubleClick)
+        {
+            await locator.DblClickAsync(new() { Timeout = ActionTimeoutMs });
+        }
+        else
+        {
+            await locator.ClickAsync(new() { Timeout = ActionTimeoutMs });
+        }
+
+        await SettleAsync(page);
+        if (page.Context.Pages.Count > pagesBefore && page.Context.Pages[^1] is { IsClosed: false } popup)
+        {
+            session.SetActivePage(popup);
+            await SettleAsync(popup);
+            return await DescribePageAsync(popup, $"Clicked {element}; it opened a new tab", full: true);
+        }
+
+        return await DescribePageAsync(page, $"Clicked {element}");
+    }
+
+    private async Task<string> TypeAsync(
+        [Description("ref")] string @ref,
+        [Description("Text to type.")] string text,
+        [Description("What it is")] string element,
+        [Description("Press Enter after typing.")] bool submit = false,
+        [Description("Replace content")] bool clear = true,
+        CancellationToken cancellationToken = default)
+    {
+        var page = await session.GetActivePageAsync(cancellationToken);
+        var locator = await ResolveAsync(page, @ref);
+
+        var type = await locator.GetAttributeAsync("type", new() { Timeout = 2000 });
+        if (string.Equals(type, "password", StringComparison.OrdinalIgnoreCase))
+        {
+            await guard.EnsureApprovedAsync($"Type into password field '{element}'", "Password fields are sensitive.", cancellationToken);
+        }
+
+        await PointAtAsync(page, locator, PointerAction.Type, element, cancellationToken);
+        if (clear)
+        {
+            await locator.FillAsync(text, new() { Timeout = ActionTimeoutMs });
+        }
+        else
+        {
+            await locator.PressSequentiallyAsync(text, new() { Delay = 15, Timeout = ActionTimeoutMs });
+        }
+
+        if (submit)
+        {
+            await locator.PressAsync("Enter", new() { Timeout = ActionTimeoutMs });
+            await SettleAsync(page);
+            return await DescribePageAsync(page, $"Typed into {element} and pressed Enter");
+        }
+
+        return $"Typed {text.Length} characters into {element}.";
+    }
+
+    private async Task<string> SelectOptionAsync(
+        [Description("ref")] string @ref,
+        [Description("Option label or value.")] string value,
+        [Description("What it is")] string element,
+        CancellationToken cancellationToken = default)
+    {
+        var page = await session.GetActivePageAsync(cancellationToken);
+        var locator = await ResolveAsync(page, @ref);
+        await PointAtAsync(page, locator, PointerAction.Click, element, cancellationToken);
+        try
+        {
+            await locator.SelectOptionAsync(new SelectOptionValue { Label = value }, new() { Timeout = 3000 });
+        }
+        catch (PlaywrightException)
+        {
+            await locator.SelectOptionAsync(value, new() { Timeout = ActionTimeoutMs });
+        }
+
+        await SettleAsync(page);
+        return $"Selected '{value}' in {element}.";
+    }
+
+    private async Task<string> PressAsync(
+        [Description("Key")] string keys,
+        CancellationToken cancellationToken = default)
+    {
+        var page = await session.GetActivePageAsync(cancellationToken);
+        await page.Keyboard.PressAsync(keys);
+        await SettleAsync(page);
+        return $"Pressed {keys}. Page: {await SafeTitleAsync(page)} ({page.Url})";
+    }
+
+    private async Task<string> ScrollAsync(
+        [Description("'down' or 'up'.")] string direction = "down",
+        [Description("Number of screens to scroll.")] double screens = 1,
+        CancellationToken cancellationToken = default)
+    {
+        var page = await session.GetActivePageAsync(cancellationToken);
+        var sign = direction.Equals("up", StringComparison.OrdinalIgnoreCase) ? -1 : 1;
+        var viewport = await GetViewportAsync(page);
+        await PointAtViewportAsync(page, new ScreenRect(viewport.InnerWidth / 2 - 1, viewport.InnerHeight / 2 - 1, 2, 2),
+            PointerAction.Scroll, $"Scroll {direction}", cancellationToken);
+        await page.EvaluateAsync("(dy) => window.scrollBy({ top: dy, behavior: 'smooth' })", sign * screens * viewport.InnerHeight * 0.85);
+        await Task.Delay(600, cancellationToken);
+        return await DescribePageAsync(page, $"Scrolled {direction}");
+    }
+
+    private async Task<string> BackAsync(CancellationToken cancellationToken = default)
+    {
+        var page = await session.GetActivePageAsync(cancellationToken);
+        await page.GoBackAsync(new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 15000 });
+        await SettleAsync(page);
+        return await DescribePageAsync(page, "Went back", full: true);
+    }
+
+    private async Task<string> ReadTextAsync(
+        [Description("Optional ref")] string? @ref = null,
+        CancellationToken cancellationToken = default)
+    {
+        var page = await session.GetActivePageAsync(cancellationToken);
+        if (!string.IsNullOrWhiteSpace(@ref))
+        {
+            var text = await (await ResolveAsync(page, @ref)).InnerTextAsync(new() { Timeout = ActionTimeoutMs });
+            return text.Length > Options.ReadTextLimit ? text[..Options.ReadTextLimit] + "\n…(truncated)" : text;
+        }
+
+        var body = await page.EvaluateAsync<string>(PageScripts.ReadText, Options.ReadTextLimit);
+        return $"{await SafeTitleAsync(page)} ({page.Url})\n{body}";
+    }
+
+    private async Task<string> TabsAsync(
+        [Description("'list', 'switch', 'new' or 'close'.")] string action = "list",
+        [Description("Tab index")] int? index = null,
+        [Description("URL for 'new'.")] string? url = null,
+        CancellationToken cancellationToken = default)
+    {
+        var pages = await session.GetPagesAsync(cancellationToken);
+        switch (action.ToLowerInvariant())
+        {
+            case "new":
+                return await OpenAsync(string.IsNullOrWhiteSpace(url) ? "about:blank" : url, newTab: true, cancellationToken);
+
+            case "switch" or "close" when index is null || index < 0 || index >= pages.Count:
+                throw new ArgumentException($"Tab index must be between 0 and {pages.Count - 1}.");
+
+            case "switch":
+                var target = pages[index!.Value];
+                session.SetActivePage(target);
+                await target.BringToFrontAsync();
+                await ActivateChromeWindowAsync(target);
+                return await DescribePageAsync(target, $"Switched to tab {index}", full: true);
+
+            case "close":
+                await pages[index!.Value].CloseAsync();
+                return $"Closed tab {index}.";
+
+            default:
+                var active = await session.GetActivePageAsync(cancellationToken);
+                var builder = new StringBuilder();
+                for (var i = 0; i < pages.Count; i++)
+                {
+                    builder.Append(pages[i] == active ? "* " : "- ")
+                        .Append(i).Append(": ").Append(await SafeTitleAsync(pages[i])).Append(" — ").AppendLine(pages[i].Url);
+                }
+
+                return builder.ToString();
+        }
+    }
+
+    internal static string NormalizeUrl(string url)
+    {
+        url = url.Trim();
+        return System.Text.RegularExpressions.Regex.IsMatch(url, "^(https?|file|about|data|chrome|view-source):", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+            ? url
+            : "https://" + url;
+    }
+
+    private async Task<string> DescribePageAsync(IPage page, string? header, bool full = false)
+    {
+        var json = await page.EvaluateAsync<JsonElement>(PageScripts.Snapshot,
+            new { limit = Options.SnapshotElementLimit, textBudget = 1500 });
+
+        var builder = new StringBuilder();
+        if (header is not null)
+        {
+            builder.AppendLine(header + ".");
+        }
+
+        var url = json.GetProperty("url").GetString() ?? string.Empty;
+        builder.Append("Page: ").Append(json.GetProperty("title").GetString()).Append(" — ").AppendLine(url);
+        builder.Append("Scroll: ").Append(json.GetProperty("scrollY").GetInt32())
+            .Append('/').Append(json.GetProperty("scrollHeight").GetInt32())
+            .Append(" (viewport ").Append(json.GetProperty("viewportHeight").GetInt32()).AppendLine(")");
+        var lines = json.GetProperty("lines").EnumerateArray().Select(l => l.GetString() ?? string.Empty).ToList();
+
+        var diff = !full && _snapshots.TryGetValue(page, out var previous) && previous.Url == url
+            ? SnapshotDiff.Describe(previous.Lines, lines)
+            : null;
+        _snapshots.AddOrUpdate(page, new PageSnapshot(url, lines));
+
+        if (diff is not null)
+        {
+            return builder.Append(diff).ToString();
+        }
+
+        foreach (var line in lines)
+        {
+            builder.AppendLine(line);
+        }
+
+        if (json.GetProperty("truncated").GetBoolean())
+        {
+            builder.AppendLine("…(more elements below; scroll to see them)");
+        }
+
+        return builder.ToString();
+    }
+
+    private async Task<ILocator> ResolveAsync(IPage page, string reference)
+    {
+        var normalized = reference.Trim().Trim('[', ']');
+        var locator = page.Locator($"[{PageScripts.RefAttribute}='{normalized}']");
+        if (await locator.CountAsync() == 0)
+        {
+            // Return the current state right away instead of making the model spend a step on browser_snapshot.
+            throw new InvalidOperationException($"Ref '{normalized}' no longer exists. {await DescribePageAsync(page, null)}");
+        }
+
+        return locator.First;
+    }
+
+    /// <summary>The description comes from the model; double-check the element's real text for risky words.</summary>
+    private async Task GuardRealNameAsync(ILocator locator, string description, CancellationToken cancellationToken)
+    {
+        if (riskPolicy.Mode != SafetyMode.ConfirmRisky || riskPolicy.TryFindRiskyKeyword(description, out _))
+        {
+            return;
+        }
+
+        string realName;
+        try
+        {
+            realName = await locator.EvaluateAsync<string>(
+                "e => (e.getAttribute('aria-label') || e.innerText || e.value || e.getAttribute('title') || '').trim().slice(0, 120)");
+        }
+        catch (PlaywrightException)
+        {
+            return;
+        }
+
+        if (riskPolicy.TryFindRiskyKeyword(realName, out var keyword))
+        {
+            await guard.EnsureApprovedAsync($"Click \"{realName}\"", $"The element looks risky (\"{keyword}\").", cancellationToken);
+        }
+    }
+
+    private async Task PointAtAsync(IPage page, ILocator locator, PointerAction action, string label, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await locator.ScrollIntoViewIfNeededAsync(new() { Timeout = 3000 });
+            var box = await locator.BoundingBoxAsync(new() { Timeout = 3000 });
+            if (box is not null)
+            {
+                await PointAtViewportAsync(page, new ScreenRect(box.X, box.Y, box.Width, box.Height), action, label, cancellationToken);
+            }
+        }
+        catch (PlaywrightException ex)
+        {
+            logger.LogDebug(ex, "Could not position the AI pointer");
+        }
+    }
+
+    private async Task PointAtViewportAsync(IPage page, ScreenRect cssRect, PointerAction action, string label, CancellationToken cancellationToken)
+    {
+        var hwnd = await ActivateChromeWindowAsync(page);
+        if (windows.GetWindowBounds(hwnd) is not { } windowBounds)
+        {
+            return;
+        }
+
+        var viewport = await GetViewportAsync(page);
+        await pointer.PointAsync(ViewportMapper.ToScreen(windowBounds, viewport, cssRect), action, label, cancellationToken);
+    }
+
+    private async Task<nint> ActivateChromeWindowAsync(IPage page)
+    {
+        var hwnd = windows.FindWindow("chrome", await SafeTitleAsync(page));
+        if (hwnd != 0)
+        {
+            windows.Activate(hwnd);
+        }
+
+        return hwnd;
+    }
+
+    private static async Task<ViewportMetrics> GetViewportAsync(IPage page)
+    {
+        var json = await page.EvaluateAsync<JsonElement>(PageScripts.Viewport);
+        return new ViewportMetrics(
+            json.GetProperty("innerWidth").GetDouble(),
+            json.GetProperty("innerHeight").GetDouble(),
+            json.GetProperty("devicePixelRatio").GetDouble());
+    }
+
+    private static async Task SettleAsync(IPage page)
+    {
+        try
+        {
+            await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded, new() { Timeout = 10000 });
+            await page.WaitForLoadStateAsync(LoadState.NetworkIdle, new() { Timeout = 600 });
+        }
+        catch (TimeoutException)
+        {
+            // Busy pages never become network-idle; the DOM is good enough.
+        }
+        catch (PlaywrightException)
+        {
+        }
+
+        await Task.Delay(100);
+    }
+
+    private static async Task<string> SafeTitleAsync(IPage page)
+    {
+        try
+        {
+            return await page.TitleAsync();
+        }
+        catch (PlaywrightException)
+        {
+            return string.Empty;
+        }
+    }
+}

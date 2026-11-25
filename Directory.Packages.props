@@ -1,0 +1,25 @@
+<Project>
+  <ItemGroup>
+    <PackageVersion Include="Microsoft.Extensions.AI" Version="11.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.AI.OpenAI" Version="11.0.1" />
+    <PackageVersion Include="Azure.AI.OpenAI" Version="2.1.0" />
+    <PackageVersion Include="OllamaSharp" Version="5.5.2" />
+    <PackageVersion Include="Anthropic.SDK" Version="5.10.0" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.Playwright" Version="1.65.1" />
+    <PackageVersion Include="FlaUI.UIA3" Version="5.0.0" />
+    <PackageVersion Include="System.Drawing.Common" Version="10.0.15" />
+    <PackageVersion Include="Whisper.net" Version="1.9.1" />
+    <PackageVersion Include="Whisper.net.Runtime" Version="1.9.1" />
+    <PackageVersion Include="Whisper.net.Runtime.Vulkan" Version="1.9.1" />
+    <PackageVersion Include="org.k2fsa.sherpa.onnx" Version="2.0.3" />
+    <PackageVersion Include="NAudio" Version="3.3.0" />
+    <PackageVersion Include="SkiaSharp.Skottie" Version="4.157.0" />
+    <PackageVersion Include="SkiaSharp.Views.WPF" Version="4.157.0" />
+    <PackageVersion Include="H.NotifyIcon.Wpf" Version="2.4.1" />
+    <PackageVersion Include="xunit.v3" Version="4.0.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.1" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.12.0" />
+    <PackageVersion Include="NSubstitute" Version="6.2.0" />
+  </ItemGroup>
+</Project>

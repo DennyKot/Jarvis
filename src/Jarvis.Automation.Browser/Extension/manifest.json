@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Jarvis Bridge",
+  "version": "1.0.0",
+  "description": "Lets the Jarvis desktop assistant read and operate pages in this browser when you ask it to.",
+  "key": "__KEY__",
+  "permissions": ["tabs", "scripting", "alarms"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js" }
+}

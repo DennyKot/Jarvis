@@ -1,0 +1,29 @@
+<Window x:Class="Jarvis.App.Views.SetupWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Jarvis — setup"
+        Width="440" SizeToContent="Height"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        WindowStartupLocation="CenterScreen" Topmost="True" ResizeMode="NoResize">
+    <Border CornerRadius="16" Padding="20,16" Background="#F7161A35" BorderBrush="#00E5FF" BorderThickness="1.5" Margin="12">
+        <Border.Effect>
+            <DropShadowEffect Color="#00E5FF" BlurRadius="24" ShadowDepth="0" Opacity="0.45" />
+        </Border.Effect>
+        <StackPanel>
+            <TextBlock Text="Welcome to Jarvis" Foreground="#00E5FF" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,8" />
+            <TextBlock Foreground="#9AA7D6" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,12"
+                       Text="Jarvis runs a local AI model with Ollama, so your commands stay on this computer and no API key is needed." />
+            <CheckBox x:Name="InstallCheckBox" IsChecked="True" Foreground="White" FontSize="13" Margin="0,0,0,12" />
+            <StackPanel x:Name="ProgressPanel" Visibility="Collapsed" Margin="0,0,0,12">
+                <TextBlock x:Name="StatusText" Foreground="White" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,6" />
+                <ProgressBar x:Name="Progress" Height="6" Minimum="0" Maximum="100" Foreground="#00E5FF" Background="#2A3170" BorderThickness="0" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="CancelButton" Content="Skip" IsCancel="True" Padding="14,6" Margin="0,0,8,0"
+                        Background="#2A3170" Foreground="White" BorderBrush="#4A55A0" Cursor="Hand" />
+                <Button x:Name="ContinueButton" Content="Continue" IsDefault="True" Padding="14,6"
+                        Background="#00E5FF" Foreground="#161A35" FontWeight="SemiBold" BorderBrush="#00E5FF" Cursor="Hand" />
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</Window>

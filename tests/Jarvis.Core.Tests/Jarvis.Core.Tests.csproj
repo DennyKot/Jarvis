@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="NSubstitute" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Jarvis.Core\Jarvis.Core.csproj" />
+    <ProjectReference Include="..\..\src\Jarvis.Automation.Browser\Jarvis.Automation.Browser.csproj" />
+    <ProjectReference Include="..\..\src\Jarvis.Automation.Desktop\Jarvis.Automation.Desktop.csproj" />
+    <ProjectReference Include="..\..\src\Jarvis.Voice\Jarvis.Voice.csproj" />
+  </ItemGroup>
+</Project>
