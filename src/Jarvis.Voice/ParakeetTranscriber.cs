@@ -46,6 +46,19 @@ public sealed class ParakeetTranscriber(
         }
     }
 
+    public async Task PrepareAsync(CancellationToken cancellationToken)
+    {
+        await _lock.WaitAsync(cancellationToken);
+        try
+        {
+            _recognizer ??= CreateRecognizer(await EnsureModelAsync(cancellationToken));
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
     public void Dispose() => _recognizer?.Dispose();
 
     private static OfflineRecognizer CreateRecognizer(string directory)

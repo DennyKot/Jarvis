@@ -57,6 +57,8 @@ public sealed class WhisperTranscriber(
         return System.Text.RegularExpressions.Regex.Replace(cleaned, @"\s+", " ").Trim();
     }
 
+    public Task PrepareAsync(CancellationToken cancellationToken) => GetFactoryAsync(cancellationToken);
+
     public void Dispose() => _factory?.Dispose();
 
     private async Task<WhisperFactory> GetFactoryAsync(CancellationToken cancellationToken)

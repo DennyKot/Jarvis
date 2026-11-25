@@ -26,5 +26,11 @@ public sealed class HybridTranscriber(
         return await whisper.TranscribeAsync(samples, cancellationToken);
     }
 
+    public async Task PrepareAsync(CancellationToken cancellationToken)
+    {
+        await parakeet.PrepareAsync(cancellationToken);
+        await whisper.PrepareAsync(cancellationToken);
+    }
+
     internal static bool ContainsCyrillic(string text) => text.Any(c => c is >= '\u0400' and <= '\u04FF');
 }

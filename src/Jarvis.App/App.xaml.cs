@@ -87,6 +87,21 @@ public partial class App : Application
         var profiles = _host.Services.GetRequiredService<Jarvis.Core.Agent.UserProfileService>();
         _ = Task.Run(() => profiles.Profile);
 
+        // Download/load speech models up front instead of on the first voice command.
+        var transcriber = _host.Services.GetRequiredService<Jarvis.Voice.ISpeechTranscriber>();
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await transcriber.PrepareAsync(CancellationToken.None);
+                logger.LogInformation("Speech models ready");
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Speech model preload failed; will retry on first use");
+            }
+        });
+
         var controller = _host.Services.GetRequiredService<JarvisController>();
         controller.Start();
         _host.Services.GetRequiredService<PointerService>().SetHome(avatar.CharacterCenterPhysical);
@@ -186,19 +201,18 @@ public partial class App : Application
         menu.Items.Add(new Separator());
         menu.Items.Add(Item("Exit", Shutdown));
 
+        var status = _host!.Services.GetRequiredService<Jarvis.Core.Agent.AssistantStatus>();
         var tray = new TaskbarIcon
         {
-            ToolTipText = "Jarvis",
+            ToolTipText = TrayIconRenderer.Describe(status.State),
             ContextMenu = menu,
-            IconSource = new GeneratedIconSource
-            {
-                Text = "J",
-                Foreground = new SolidColorBrush(Color.FromRgb(0x16, 0x1A, 0x35)),
-                Background = new LinearGradientBrush(Color.FromRgb(0x00, 0xE5, 0xFF), Color.FromRgb(0xA0, 0x7C, 0xFF), 45),
-                FontWeight = FontWeights.Bold,
-                FontSize = 52,
-            },
+            IconSource = TrayIconRenderer.Render(status.State),
         };
+        status.StateChanged += state => Dispatcher.BeginInvoke(() =>
+        {
+            tray.IconSource = TrayIconRenderer.Render(state);
+            tray.ToolTipText = TrayIconRenderer.Describe(state);
+        });
         tray.TrayLeftMouseUp += (_, _) => controller.Talk();
         tray.ForceCreate();
         return tray;
