@@ -202,6 +202,50 @@ public class AgentRunnerTests
     }
 
     [Fact]
+    public async Task PreviewAsync_KeepsToolGroupsHidden_WhenFollowedByRealRun()
+    {
+        // Arrange
+        _client.Enqueue(Call("browser_open", "Wikipedia"), Text("Plan."), Text("Done."));
+        var runner = CreateRunner(tools: [NamedTool("browser_open"), NamedTool("browser_click")]);
+        await runner.PreviewAsync("open wikipedia", TestContext.Current.CancellationToken);
+
+        // Act
+        await runner.RunAsync("hello", TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(["browser_open"], _client.ToolNames[^1]);
+    }
+
+    [Fact]
+    public async Task RunAsync_RunsRepeatedScroll_WhenToolIsRepeatable()
+    {
+        // Arrange
+        _client.Enqueue(Call("browser_scroll", "down"), Call("browser_scroll", "down"), Call("browser_scroll", "down"), Text("Scrolled."));
+        var runner = CreateRunner(tools: NamedTool("browser_scroll"));
+
+        // Act
+        await runner.RunAsync("scroll a lot", TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(3, _invocations.Count);
+    }
+
+    [Fact]
+    public async Task RunAsync_SkipsUndoEntry_WhenToolReportsError()
+    {
+        // Arrange
+        var tool = JarvisTool.Create((string element) => "Error: element not found", "click", "Click");
+        _client.Enqueue(Call("click", "OK"), Text("Failed."));
+        var runner = CreateRunner(tools: tool);
+
+        // Act
+        await runner.RunAsync("click ok", TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.False(_undo.CanUndo);
+    }
+
+    [Fact]
     public async Task RunAsync_MakesActionUndoable_WhenToolSetsUndo()
     {
         // Arrange

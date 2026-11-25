@@ -46,6 +46,9 @@ public sealed class AgentRunner : IAgentRunner
 {
     private const string ObservationMarker = "jarvis.observation";
 
+    /// <summary>Tools where identical consecutive calls are normal (scroll down, press Down/Tab several times).</summary>
+    private static readonly HashSet<string> RepeatableTools = ["browser_scroll", "browser_press", "send_keys"];
+
     internal const string DryRunInstruction =
         "[DRY RUN: action tools are simulated and change nothing; read-only tools work normally. " +
         "Call the actions you would take, in order, then reply with a one-sentence summary of the plan.]\n";
@@ -132,6 +135,12 @@ public sealed class AgentRunner : IAgentRunner
 
         await _runLock.WaitAsync(cancellationToken);
         _plan = [];
+        ToolGroup[] groupsBefore;
+        lock (_history)
+        {
+            groupsBefore = [.. _activeGroups];
+        }
+
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -141,6 +150,13 @@ public sealed class AgentRunner : IAgentRunner
         }
         finally
         {
+            // A dry run must not reveal tool groups for later real runs.
+            lock (_history)
+            {
+                _activeGroups.Clear();
+                _activeGroups.UnionWith(groupsBefore);
+            }
+
             _plan = null;
             _runLock.Release();
         }
@@ -244,7 +260,7 @@ public sealed class AgentRunner : IAgentRunner
                 _repeatCount = signature == _lastCallSignature ? _repeatCount + 1 : 1;
                 _lastCallSignature = signature;
 
-                var result = _repeatCount >= 3
+                var result = _repeatCount >= (RepeatableTools.Contains(call.Name) ? 10 : 3)
                     ? $"You already called {call.Name} with the same arguments {_repeatCount - 1} times in a row. " +
                       "Do something different, or give your final answer."
                     : await InvokeToolAsync(call, cancellationToken);
@@ -284,11 +300,16 @@ public sealed class AgentRunner : IAgentRunner
     }
 
     /// <summary>Tools sent to the model; kept in a stable order so the prompt prefix stays cacheable.</summary>
-    private List<AITool> VisibleTools() =>
-        _tools.Values
-            .Where(t => !_options.Llm.DynamicTools || _activeGroups.Contains(ToolGroups.Of(t.Name)))
-            .Select(t => (AITool)t.Function)
-            .ToList();
+    private List<AITool> VisibleTools()
+    {
+        lock (_history)
+        {
+            return _tools.Values
+                .Where(t => !_options.Llm.DynamicTools || _activeGroups.Contains(ToolGroups.Of(t.Name)))
+                .Select(t => (AITool)t.Function)
+                .ToList();
+        }
+    }
 
     /// <summary>Hidden tools stay callable; using one (or an entry point like browser_open) reveals its group.</summary>
     private bool ActivateGroups(IEnumerable<FunctionCallContent> calls)
@@ -298,7 +319,10 @@ public sealed class AgentRunner : IAgentRunner
         {
             foreach (var group in ToolGroups.ActivatedBy(call.Name, _options.Browser.Mode))
             {
-                changed |= _activeGroups.Add(group);
+                lock (_history)
+                {
+                    changed |= _activeGroups.Add(group);
+                }
             }
         }
 
@@ -360,16 +384,22 @@ public sealed class AgentRunner : IAgentRunner
             _status.ReportActivity(description);
 
             var functionArguments = new AIFunctionArguments(arguments);
-            var result = tool.Risk == ToolRisk.ReadOnly || tool.Name == UndoToolProvider.ToolName
-                ? await tool.Function.InvokeAsync(functionArguments, cancellationToken)
-                : await _undo.TrackAsync(description, () => tool.Function.InvokeAsync(functionArguments, cancellationToken).AsTask());
-            return result switch
+            if (tool.Risk == ToolRisk.ReadOnly || tool.Name == UndoToolProvider.ToolName)
             {
-                null => "OK",
-                string s => s,
-                JsonElement { ValueKind: JsonValueKind.String } json => json.GetString() ?? "OK",
-                _ => result.ToString() ?? "OK",
-            };
+                return ToText(await tool.Function.InvokeAsync(functionArguments, cancellationToken));
+            }
+
+            return await _undo.TrackAsync(description, async () =>
+            {
+                var text = ToText(await tool.Function.InvokeAsync(functionArguments, cancellationToken));
+                if (text.StartsWith("Error", StringComparison.OrdinalIgnoreCase))
+                {
+                    // A reported failure changed nothing; recording it would leave an un-undoable barrier.
+                    _undo.SkipRecording();
+                }
+
+                return text;
+            });
         }
         catch (ActionDeniedException ex)
         {
@@ -385,6 +415,14 @@ public sealed class AgentRunner : IAgentRunner
             return $"Error: {ex.GetBaseException().Message}";
         }
     }
+
+    private static string ToText(object? result) => result switch
+    {
+        null => "OK",
+        string s => s,
+        JsonElement { ValueKind: JsonValueKind.String } json => json.GetString() ?? "OK",
+        _ => result.ToString() ?? "OK",
+    };
 
     internal static string Describe(JarvisTool tool, IDictionary<string, object?> arguments)
     {

@@ -16,7 +16,7 @@ internal enum ToolGroup
 /// </summary>
 internal static class ToolGroups
 {
-    private static readonly HashSet<string> CoreTools = ["web_lookup", "browser_open", "launch_app",     "focus_window", "list_windows", "undo_last_action"];
+    private static readonly HashSet<string> CoreTools = ["web_lookup", "browser_open", "launch_app", "focus_window", "list_windows", "undo_last_action"];
 
     private static readonly HashSet<string> DesktopTools =
         ["ui_tree", "ui_find", "ui_click", "ui_type", "type_text", "send_keys", "screenshot", "ocr", "click_at"];

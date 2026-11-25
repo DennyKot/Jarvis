@@ -308,6 +308,12 @@ public sealed class JarvisController(
 
     private void ResetConversation()
     {
+        if (IsBusy)
+        {
+            avatar.ShowActivity($"I'm still working. Press {options.Value.Hotkeys.Stop} to stop me first.");
+            return;
+        }
+
         agent.ResetConversation();
         avatar.ShowReply("Okay, starting a new conversation.");
     }
