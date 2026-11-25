@@ -17,6 +17,7 @@ public class AgentRunnerTests
     private readonly AgentObservations _observations = new();
     private readonly List<string> _invocations = [];
     private readonly AssistantStatus _status = new();
+    private readonly UndoJournal _undo = new();
 
     private AgentRunner CreateRunner(int maxSteps = 10, params JarvisTool[] tools)
     {
@@ -27,7 +28,7 @@ public class AgentRunnerTests
         provider.GetTools().Returns(tools);
         var status = _status;
         return new AgentRunner(factory, [provider], new RiskPolicy(options), new ActionGuard(_confirmation, status, options),
-            status, _observations, options, NullLogger<AgentRunner>.Instance);
+            status, _observations, options, NullLogger<AgentRunner>.Instance, undo: _undo);
     }
 
     private JarvisTool ClickTool(ToolRisk risk = ToolRisk.Action) =>
@@ -48,6 +49,24 @@ public class AgentRunnerTests
             _invocations.Add(name);
             return "ok";
         }, name, name);
+
+    [Fact]
+    public async Task RunAsync_AppendsWebSource_WhenAnswerHasNoLink()
+    {
+        // Arrange
+        var lookup = JarvisTool.Create((string query) => "Kyiv facts\nSource: [Wikipedia](https://en.wikipedia.org/wiki/Kyiv)",
+            "web_lookup", "Lookup", ToolRisk.ReadOnly);
+        _client.Enqueue(
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, [new FunctionCallContent("c1", "web_lookup", new Dictionary<string, object?> { ["query"] = "Kyiv" })])),
+            Text("Kyiv has 2.9 million people."));
+        var runner = CreateRunner(tools: lookup);
+
+        // Act
+        var answer = await runner.RunAsync("population of Kyiv", TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal("Kyiv has 2.9 million people.\nSource: [Wikipedia](https://en.wikipedia.org/wiki/Kyiv)", answer);
+    }
 
     [Fact]
     public async Task RunAsync_RevealsWebTools_AfterBrowserOpen()
@@ -143,6 +162,69 @@ public class AgentRunnerTests
         // Assert
         Assert.Equal(["Send"], _invocations);
         await _confirmation.Received(1).ConfirmAsync(Arg.Any<ConfirmationRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PreviewAsync_PlansActionsWithoutRunningThem_WhenDryRun()
+    {
+        // Arrange
+        _client.Enqueue(Call("click", "Delete account"), Text("I would delete the account."));
+        var runner = CreateRunner(tools: ClickTool());
+
+        // Act
+        var plan = await runner.PreviewAsync("delete my account", TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Empty(_invocations);
+        var action = Assert.Single(plan.Actions);
+        Assert.Equal("Click: Delete account", action.Description);
+        Assert.NotNull(action.RiskReason);
+        Assert.Equal("I would delete the account.", plan.Summary);
+        await _confirmation.DidNotReceive().ConfirmAsync(Arg.Any<ConfirmationRequest>(), Arg.Any<CancellationToken>());
+        Assert.False(_undo.CanUndo);
+    }
+
+    [Fact]
+    public async Task PreviewAsync_LeavesHistoryUntouched_WhenFollowedByRealRun()
+    {
+        // Arrange
+        _client.Enqueue(Call("click", "Search button"), Text("Plan."), Text("Done."));
+        var runner = CreateRunner(tools: ClickTool());
+        await runner.PreviewAsync("search", TestContext.Current.CancellationToken);
+
+        // Act
+        await runner.RunAsync("search", TestContext.Current.CancellationToken);
+
+        // Assert
+        var lastRequest = _client.Requests[^1];
+        Assert.DoesNotContain(lastRequest, m => m.Text.Contains("DRY RUN", StringComparison.Ordinal));
+        Assert.DoesNotContain(lastRequest.SelectMany(m => m.Contents), c => c is FunctionCallContent);
+    }
+
+    [Fact]
+    public async Task RunAsync_MakesActionUndoable_WhenToolSetsUndo()
+    {
+        // Arrange
+        var undone = false;
+        var tool = JarvisTool.Create((string element) =>
+        {
+            _undo.SetUndo(_ =>
+            {
+                undone = true;
+                return Task.FromResult("reverted");
+            });
+            return "typed";
+        }, "type_text", "Type");
+        _client.Enqueue(Call("type_text", "Notes"), Text("Typed."));
+        var runner = CreateRunner(tools: tool);
+        await runner.RunAsync("type", TestContext.Current.CancellationToken);
+
+        // Act
+        var message = await _undo.UndoLastAsync(TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.True(undone);
+        Assert.Equal("Undid \"Type text: Notes\": reverted", message);
     }
 
     [Fact]

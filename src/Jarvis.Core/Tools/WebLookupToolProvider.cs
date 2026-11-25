@@ -46,11 +46,24 @@ public sealed partial class WebLookupToolProvider(
         var wikipedia = TryAsync(() => WikipediaAsync(query, language, cancellationToken), "Wikipedia");
         var web = TryAsync(() => WebResultsAsync(query, cancellationToken), "web search");
         var parts = (await Task.WhenAll(wikipedia, web)).Where(p => !string.IsNullOrWhiteSpace(p)).ToList();
+        if (parts.Count == 0)
+        {
+            return $"Nothing found for '{query}'. Try other words, or open a site with browser_open.";
+        }
 
-        return parts.Count == 0
-            ? $"Nothing found for '{query}'. Try other words, or open a site with browser_open."
-            : string.Join("\n\n", parts);
+        var sources = SourceRegex().Matches(string.Join('\n', parts))
+            .Select(m => (Name: m.Groups["name"].Value.Trim(), Url: m.Groups["url"].Value))
+            .DistinctBy(s => s.Url)
+            .Take(2)
+            .Select(s => $"[{(s.Name.StartsWith("Wikipedia: ", StringComparison.Ordinal) ? "Wikipedia" : s.Name)}]({s.Url})");
+        return string.Join("\n\n", parts) + "\n" + SourcePrefix + string.Join(", ", sources);
     }
+
+    /// <summary>Last line of every web_lookup result; the agent appends it to the answer if the model forgot to cite.</summary>
+    public const string SourcePrefix = "Source: ";
+
+    [GeneratedRegex(@"^(?:- )?(?<name>[^\n(]+?) \((?<url>https?://[^\s)]+)\)", RegexOptions.Multiline)]
+    private static partial Regex SourceRegex();
 
     private async Task<string?> TryAsync(Func<Task<string?>> action, string source)
     {

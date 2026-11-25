@@ -109,6 +109,7 @@ public sealed class HotkeyOptions
     public string Talk { get; set; } = "Ctrl+Space";
     public string Type { get; set; } = "Ctrl+Alt+J";
     public string Stop { get; set; } = "Ctrl+Alt+X";
+    public string Undo { get; set; } = "Ctrl+Alt+Z";
 }
 
 public enum BrowserMode
@@ -151,6 +152,12 @@ public sealed class SafetyOptions
 {
     public SafetyMode Mode { get; set; } = SafetyMode.ConfirmRisky;
     public TimeSpan ConfirmationTimeout { get; set; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// In the confirm modes, plan every command with a dry run first and show the planned actions for approval
+    /// before anything is done. Commands that only read (questions) are answered by the dry run directly.
+    /// </summary>
+    public bool PreviewPlan { get; set; }
 
     public string[] RiskyKeywords { get; set; } =
     [

@@ -19,7 +19,8 @@ public sealed class ExtensionBrowserToolProvider(
     RiskPolicy riskPolicy,
     IOptions<JarvisOptions> options,
     Jarvis.Core.Agent.AssistantStatus status,
-    ILogger<ExtensionBrowserToolProvider> logger) : IToolProvider
+    ILogger<ExtensionBrowserToolProvider> logger,
+    UndoJournal? undo = null) : IToolProvider
 {
     private readonly Dictionary<int, (string Url, List<string> Lines)> _snapshots = [];
     private bool _installAttempted;
@@ -47,7 +48,9 @@ public sealed class ExtensionBrowserToolProvider(
     {
         await EnsureConnectedAsync(cancellationToken);
         url = BrowserToolProvider.NormalizeUrl(url);
+        var before = await TryGetTabStateAsync(cancellationToken);
         await bridge.SendAsync("open", new { url, newTab }, cancellationToken, TimeSpan.FromSeconds(35));
+        await RecordTabUndoAsync(before, mayOpenTab: true, cancellationToken);
         return await DescribeAsync("Opened " + url, full: true, cancellationToken);
     }
 
@@ -72,7 +75,9 @@ public sealed class ExtensionBrowserToolProvider(
         }
 
         await PointAsync(target, doubleClick ? PointerAction.DoubleClick : PointerAction.Click, element, cancellationToken);
+        var before = await TryGetTabStateAsync(cancellationToken);
         await SendToElementAsync("click", new { @ref = Ref(@ref), doubleClick }, cancellationToken);
+        await RecordTabUndoAsync(before, mayOpenTab: true, cancellationToken);
         return await DescribeAsync($"Clicked {element}", full: false, cancellationToken);
     }
 
@@ -86,13 +91,22 @@ public sealed class ExtensionBrowserToolProvider(
     {
         await EnsureConnectedAsync(cancellationToken);
         var target = await LocateAsync(@ref, cancellationToken);
-        if (string.Equals(target.Type, "password", StringComparison.OrdinalIgnoreCase))
+        var isPassword = string.Equals(target.Type, "password", StringComparison.OrdinalIgnoreCase);
+        if (isPassword)
         {
             await guard.EnsureApprovedAsync($"Type into password field '{element}'", "Password fields are sensitive.", cancellationToken);
         }
 
+        // Passwords are never kept in memory for undo.
+        var previous = isPassword ? null : await TryGetValueAsync(@ref, cancellationToken);
+        var before = await TryGetTabStateAsync(cancellationToken);
         await PointAsync(target, PointerAction.Type, element, cancellationToken);
         await SendToElementAsync("type", new { @ref = Ref(@ref), text, clear, submit }, cancellationToken);
+        await RecordTabUndoAsync(before, mayOpenTab: false, cancellationToken, previous is null ? null : async ct =>
+        {
+            await SendToElementAsync("type", new { @ref = Ref(@ref), text = previous, clear = true, submit = false }, ct);
+            return $"Restored the previous text of {element}.";
+        });
         return submit
             ? await DescribeAsync($"Typed into {element} and pressed Enter", full: false, cancellationToken, excerptOnNavigation: true)
             : $"Typed {text.Length} characters into {element}.";
@@ -106,15 +120,27 @@ public sealed class ExtensionBrowserToolProvider(
     {
         await EnsureConnectedAsync(cancellationToken);
         var target = await LocateAsync(@ref, cancellationToken);
+        var previous = await TryGetValueAsync(@ref, cancellationToken);
         await PointAsync(target, PointerAction.Click, element, cancellationToken);
         await SendToElementAsync("select", new { @ref = Ref(@ref), value }, cancellationToken);
+        if (previous is not null)
+        {
+            undo?.SetUndo(async ct =>
+            {
+                await SendToElementAsync("select", new { @ref = Ref(@ref), value = previous }, ct);
+                return $"Restored the previous choice in {element}.";
+            });
+        }
+
         return await DescribeAsync($"Selected '{value}' in {element}", full: false, cancellationToken);
     }
 
     private async Task<string> PressAsync([Description("Key")] string keys, CancellationToken cancellationToken = default)
     {
         await EnsureConnectedAsync(cancellationToken);
+        var before = await TryGetTabStateAsync(cancellationToken);
         await bridge.SendAsync("press", new { keys }, cancellationToken);
+        await RecordTabUndoAsync(before, mayOpenTab: false, cancellationToken);
         return await DescribeAsync($"Pressed {keys}", full: false, cancellationToken);
     }
 
@@ -128,13 +154,16 @@ public sealed class ExtensionBrowserToolProvider(
         var viewport = await bridge.SendAsync("rect", new { @ref = "__none__" }, cancellationToken);
         var height = viewport.TryGetProperty("innerHeight", out var h) ? h.GetDouble() : 800;
         await bridge.SendAsync("scroll", new { dy = sign * screens * height * 0.85 }, cancellationToken);
+        undo?.SkipRecording();
         return await DescribeAsync($"Scrolled {direction}", full: false, cancellationToken);
     }
 
     private async Task<string> BackAsync(CancellationToken cancellationToken = default)
     {
         await EnsureConnectedAsync(cancellationToken);
+        var before = await TryGetTabStateAsync(cancellationToken);
         await bridge.SendAsync("back", null, cancellationToken);
+        await RecordTabUndoAsync(before, mayOpenTab: false, cancellationToken);
         return await DescribeAsync("Went back", full: true, cancellationToken);
     }
 
@@ -164,12 +193,15 @@ public sealed class ExtensionBrowserToolProvider(
             case "new":
                 return await OpenAsync(string.IsNullOrWhiteSpace(url) ? "about:blank" : url, newTab: true, cancellationToken);
             case "switch":
+                var before = await TryGetTabStateAsync(cancellationToken);
                 await bridge.SendAsync("tabs", new { action, index }, cancellationToken);
+                await RecordTabUndoAsync(before, mayOpenTab: false, cancellationToken);
                 return await DescribeAsync($"Switched to tab {index}", full: true, cancellationToken);
             case "close":
                 await bridge.SendAsync("tabs", new { action, index }, cancellationToken);
                 return $"Closed tab {index}.";
             default:
+                undo?.SkipRecording();
                 var tabs = await bridge.SendAsync("tabs", new { action = "list" }, cancellationToken);
                 var builder = new StringBuilder();
                 foreach (var tab in tabs.EnumerateArray())
@@ -325,6 +357,83 @@ public sealed class ExtensionBrowserToolProvider(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogDebug(ex, "Could not position the AI pointer");
+        }
+    }
+
+    private sealed record TabState(int TabId, string Url);
+
+    /// <summary>Null when undo is off or the installed extension predates the undo commands.</summary>
+    private async Task<TabState?> TryGetTabStateAsync(CancellationToken cancellationToken)
+    {
+        if (undo is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var json = await bridge.SendAsync("state", null, cancellationToken);
+            return new TabState(json.GetProperty("tabId").GetInt32(), json.GetProperty("url").GetString() ?? string.Empty);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogDebug(ex, "Could not read the tab state for undo");
+            return null;
+        }
+    }
+
+    private async Task<string?> TryGetValueAsync(string reference, CancellationToken cancellationToken)
+    {
+        if (undo is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var json = await bridge.SendAsync("value", new { @ref = Ref(reference) }, cancellationToken);
+            return json.ValueKind == JsonValueKind.Object && json.TryGetProperty("value", out var value) ? value.GetString() : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogDebug(ex, "Could not read the field value for undo");
+            return null;
+        }
+    }
+
+    /// <summary>Undo for actions that may change tabs or navigate; otherwise <paramref name="sameUrlUndo"/> (if any).</summary>
+    private async Task RecordTabUndoAsync(TabState? before, bool mayOpenTab, CancellationToken cancellationToken,
+        Func<CancellationToken, Task<string>>? sameUrlUndo = null)
+    {
+        if (undo is null || before is null || await TryGetTabStateAsync(cancellationToken) is not { } after)
+        {
+            return;
+        }
+
+        if (after.TabId != before.TabId)
+        {
+            undo.SetUndo(async ct =>
+            {
+                if (mayOpenTab)
+                {
+                    await bridge.SendAsync("closeTab", new { tabId = after.TabId }, ct);
+                }
+
+                await bridge.SendAsync("restoreTab", new { tabId = before.TabId, url = (string?)null }, ct);
+                return mayOpenTab ? "Closed the tab it opened." : "Switched back to the previous tab.";
+            });
+        }
+        else if (after.Url != before.Url)
+        {
+            undo.SetUndo(async ct =>
+            {
+                await bridge.SendAsync("restoreTab", new { tabId = before.TabId, url = before.Url }, ct, TimeSpan.FromSeconds(35));
+                return $"Went back to {before.Url}.";
+            });
+        }
+        else if (sameUrlUndo is not null)
+        {
+            undo.SetUndo(sameUrlUndo);
         }
     }
 

@@ -25,6 +25,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<UserProfileService>();
         services.AddSingleton<RiskPolicy>();
         services.AddSingleton<IActionGuard, ActionGuard>();
+        services.AddSingleton<UndoJournal>();
+        services.AddSingleton<IToolProvider, UndoToolProvider>();
         services.AddSingleton<IToolProvider, WebLookupToolProvider>();
         services.AddSingleton<IAgentRunner, AgentRunner>();
         return services;

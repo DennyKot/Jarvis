@@ -120,6 +120,11 @@ public sealed class WindowService(InputSimulator input) : IWindowActivator
 
     public HashSet<nint> SnapshotHandles() => ListWindows().Select(w => w.Handle).ToHashSet();
 
+    /// <summary>Asks the window to close, like clicking its X (the app may still prompt to save).</summary>
+    public bool Close(nint windowHandle) =>
+        windowHandle != 0 && NativeMethods.IsWindow(windowHandle) &&
+        NativeMethods.PostMessage(windowHandle, NativeMethods.WM_CLOSE, 0, 0);
+
     public ScreenRect? GetWindowBounds(nint windowHandle)
     {
         if (windowHandle == 0 || !NativeMethods.IsWindow(windowHandle))

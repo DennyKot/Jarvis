@@ -116,10 +116,15 @@ public partial class App : Application
 
         _ = RunFirstRunSetupAsync(logger, force: false);
 
-        // Jarvis.exe --command "open notepad and type hello"
-        if (_host.Services.GetRequiredService<IConfiguration>()["command"] is { Length: > 0 } startupCommand)
+        // Jarvis.exe --command "open notepad and type hello"   |   Jarvis.exe --dry-run "open notepad and type hello"
+        var configuration = _host.Services.GetRequiredService<IConfiguration>();
+        if (configuration["command"] is { Length: > 0 } startupCommand)
         {
             controller.Submit(startupCommand);
+        }
+        else if (configuration["dry-run"] is { Length: > 0 } dryRunCommand)
+        {
+            controller.Submit("dry run: " + dryRunCommand);
         }
     }
 

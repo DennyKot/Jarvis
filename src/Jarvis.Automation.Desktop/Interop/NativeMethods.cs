@@ -68,6 +68,12 @@ internal static partial class NativeMethods
     [LibraryImport("user32.dll")]
     public static partial nint GetForegroundWindow();
 
+    public const uint WM_CLOSE = 0x0010;
+
+    [LibraryImport("user32.dll", EntryPoint = "PostMessageW", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool PostMessage(nint hWnd, uint msg, nint wParam, nint lParam);
+
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool SetForegroundWindow(nint hWnd);

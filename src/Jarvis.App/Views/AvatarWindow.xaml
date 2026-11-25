@@ -67,6 +67,8 @@
                     <MenuItem x:Name="TalkItem" Header="🎙  Talk" />
                     <MenuItem x:Name="TypeItem" Header="⌨  Type a command" />
                     <MenuItem x:Name="StopItem" Header="■  Stop" />
+                    <MenuItem x:Name="UndoItem" Header="↶  Undo last action" />
+                    <MenuItem x:Name="DryRunItem" Header="🔍  Dry run a command" />
                     <Separator />
                     <MenuItem x:Name="ResetItem" Header="↺  New conversation" />
                     <MenuItem x:Name="ExtensionItem" Header="🧩  Install Chrome extension" />

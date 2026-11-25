@@ -35,6 +35,7 @@ internal static class SystemPrompt
         {(browserMode == BrowserMode.UserWindow ? UserWindowWeb : JarvisProfileWeb)}
         - Desktop apps: launch_app or focus_window, then ui_tree / ui_click / ui_type; in editors type_text and send_keys (e.g. "ctrl+s").
           Use screenshot or ocr only when the DOM or UI tree is not enough.
+        - Prefer shortcuts over clicks: file_find for file paths; long text → clipboard_write + send_keys "ctrl+v"; copied text → send_keys "ctrl+c" + clipboard_read.
         - More tools (browser_click…, ui_*, ocr, screenshot) appear after browser_open / launch_app / focus_window.
         - Always pass a short "element" description (e.g. "Send button") when clicking or typing.
         - Never guess credentials, enter passwords or buy anything unless the user explicitly asked.

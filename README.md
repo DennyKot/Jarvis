@@ -89,9 +89,11 @@ The first web command starts Chrome with a dedicated profile in `%LOCALAPPDATA%\
 | Wake word (opt-in) | Say *"Hey Jarvis"* and then your command, or *"Hey Jarvis, open notepad"* in one go (`Voice:WakeWordEnabled`) |
 | Type a command | `Ctrl+Alt+J` |
 | Stop the current task | `Ctrl+Alt+X` |
-| Menu (new conversation, settings, logs, exit) | Right-click the robot |
+| Undo Jarvis' last action | `Ctrl+Alt+Z`, *"undo that"*, or right-click → *Undo last action* (repeat to go further back) |
+| Dry run (plan only, nothing is changed) | Start the command with *"dry run"*, e.g. *"dry run: send the report to Anna"*, or right-click → *Dry run a command* |
+| Menu (new conversation, undo, dry run, settings, logs, exit) | Right-click the robot |
 | Move the robot | Drag it |
-| Script / shortcut | `Jarvis.exe --command "open notepad and type hello"` |
+| Script / shortcut | `Jarvis.exe --command "open notepad and type hello"` (or `--dry-run "..."` to only see the plan) |
 
 Examples: *"Open Wikipedia and tell me the population of Kyiv"*, *"Відкрий Excel"*,
 *"Open VS Code and open the command palette"*, *"Read what's on the screen"*.
@@ -104,6 +106,14 @@ Examples: *"Open Wikipedia and tell me the population of Kyiv"*, *"Відкри�
 - The model's description of a target is double-checked against the element's real label.
 - Unanswered confirmations are denied after `Safety:ConfirmationTimeout`.
 - `Ctrl+Alt+X` cancels everything immediately.
+- **Plan preview**: with `Safety:PreviewPlan` = `true` (in `ConfirmRisky`/`ConfirmAll`), every command is first planned
+  with a dry run (read-only tools only; actions are recorded, not executed) and the planned steps are shown for approval.
+  Nothing happens until you allow the plan; steps marked ⚠ still ask again before they run. Questions that need no
+  actions are answered directly by the dry run.
+- **Undo** reverts Jarvis' actions newest-first: closes tabs/windows it opened, returns to the previous page or tab,
+  restores the previous text of fields it typed into (or presses `Ctrl+Z` in desktop apps) and the previous `<select>`
+  choice. Clicks that don't navigate and key presses can't be undone automatically — undo then says so instead of
+  reverting an older step. Password values are never kept for undo.
 
 ### Privacy
 
@@ -130,7 +140,8 @@ Examples: *"Open Wikipedia and tell me the population of Kyiv"*, *"Відкри�
 | `Voice:Language` / `AllowedLanguages` | `auto` / `en, uk` | Detection is restricted to the allowed languages |
 | `Voice:SilenceTimeoutMs` | 1500 | Recording stops after this much silence |
 | `Voice:WakeWordEnabled` / `WakeWords` | `false` / `hey jarvis, jarvis, джарвіс...` | Listen in the background (locally, paused while Jarvis works) and react to utterances that start with a wake phrase. Costs some CPU: every speech segment is transcribed |
-| `Hotkeys:Talk/Type/Stop` | see above | Any `Ctrl/Alt/Shift/Win + Key` |
+| `Hotkeys:Talk/Type/Stop/Undo` | see above | Any `Ctrl/Alt/Shift/Win + Key` |
+| `Safety:PreviewPlan` | false | Plan every command with a dry run and ask before running it (confirm modes only) |
 | `Browser:Mode` | `JarvisProfile` | `JarvisProfile`: Jarvis' own Chrome window (DevTools). `Extension`: your Chrome via the Jarvis Bridge extension (recommended). `UserWindow`: your Chrome driven like a desktop app |
 | `Browser:ExtensionPort` | 17345 | Local port the extension connects to |
 | `Browser:DebugPort` | 9222 | Chrome remote debugging port |
@@ -190,6 +201,7 @@ Only `idle.json` is required; missing states fall back to it.
   `browser_press`, `browser_scroll`, `browser_back`, `browser_read_text`, `browser_tabs`
 - **Desktop**: `launch_app`, `list_windows`, `focus_window`, `ui_tree`, `ui_find`, `ui_click`, `ui_type`,
   `type_text`, `send_keys`, `screenshot`, `ocr`, `click_at`
+- **Clipboard & files**: `clipboard_read`, `clipboard_write` (paste long text with ctrl+v instead of typing), `file_find` (name/wildcard search in Desktop, Documents, Downloads, profile)
 
 ## Speed and token usage
 

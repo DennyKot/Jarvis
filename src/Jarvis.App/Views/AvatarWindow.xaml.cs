@@ -43,6 +43,8 @@ public partial class AvatarWindow : Window
         TalkItem.Click += (_, _) => TalkRequested?.Invoke();
         TypeItem.Click += (_, _) => TypeRequested?.Invoke();
         StopItem.Click += (_, _) => StopRequested?.Invoke();
+        UndoItem.Click += (_, _) => UndoRequested?.Invoke();
+        DryRunItem.Click += (_, _) => DryRunRequested?.Invoke();
         ResetItem.Click += (_, _) => ResetRequested?.Invoke();
         ExtensionItem.Click += (_, _) => ExtensionInstallRequested?.Invoke();
         SettingsItem.Click += (_, _) => SettingsRequested?.Invoke();
@@ -60,6 +62,8 @@ public partial class AvatarWindow : Window
     public event Action? TalkRequested;
     public event Action? TypeRequested;
     public event Action? StopRequested;
+    public event Action? UndoRequested;
+    public event Action? DryRunRequested;
     public event Action? ResetRequested;
     public event Action? ExtensionInstallRequested;
     public event Action? SettingsRequested;

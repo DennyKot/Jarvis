@@ -6,9 +6,14 @@ public partial class ConfirmWindow : Window
 {
     private readonly TaskCompletionSource<bool> _result = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    public ConfirmWindow(string action, string reason)
+    public ConfirmWindow(string action, string reason, string? title = null)
     {
         InitializeComponent();
+        if (title is not null)
+        {
+            TitleText.Text = title;
+        }
+
         ActionText.Text = action;
         ReasonText.Text = reason;
         AllowButton.Click += (_, _) => Finish(true);

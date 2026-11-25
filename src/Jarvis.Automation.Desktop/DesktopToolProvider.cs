@@ -27,7 +27,8 @@ public sealed class DesktopToolProvider(
     IActionGuard guard,
     AgentObservations observations,
     RiskPolicy riskPolicy,
-    IOptions<JarvisOptions> options) : IToolProvider
+    IOptions<JarvisOptions> options,
+    UndoJournal? undo = null) : IToolProvider
 {
     private static readonly TimeSpan PatternTimeout = TimeSpan.FromSeconds(3);
     private nint _currentWindow;
@@ -97,6 +98,14 @@ public sealed class DesktopToolProvider(
 
             // Drop Chrome's inline autocomplete suggestion so Enter opens exactly this URL.
             input.SendKeys("delete enter");
+            var tab = chrome;
+            undo?.SetUndo(async ct =>
+            {
+                ActivateOrThrow(tab);
+                await Task.Delay(150, ct);
+                input.SendKeys(newTab ? "ctrl+w" : "alt+left");
+                return newTab ? "Closed the tab it opened." : "Went back to the previous page.";
+            });
         }
 
         _currentWindow = chrome.Handle;
@@ -160,6 +169,9 @@ public sealed class DesktopToolProvider(
             {
                 _currentWindow = created.Handle;
                 windows.Activate(created.Handle);
+                undo?.SetUndo(_ => Task.FromResult(windows.Close(created.Handle)
+                    ? $"Asked {created.Title} to close."
+                    : $"{created.Title} is already closed."));
                 return $"Started {candidate.DisplayName}. New window: {created}";
             }
         }
@@ -191,6 +203,15 @@ public sealed class DesktopToolProvider(
     private string FocusWindow([Description("Window title fragment or process name.")] string title)
     {
         var window = windows.FindWindow(title) ?? throw new InvalidOperationException($"No window matches '{title}'.");
+        if (windows.GetForegroundWindow() is { } previous && previous.Handle != window.Handle)
+        {
+            undo?.SetUndo(_ =>
+            {
+                ActivateOrThrow(previous);
+                return Task.FromResult($"Focused {previous.Title} again.");
+            });
+        }
+
         _currentWindow = window.Handle;
         return windows.Activate(window.Handle)
             ? $"Focused {window}"
@@ -257,7 +278,8 @@ public sealed class DesktopToolProvider(
         CancellationToken cancellationToken = default)
     {
         var target = uia.GetElement(id);
-        if (SafeIsPassword(target))
+        var isPassword = SafeIsPassword(target);
+        if (isPassword)
         {
             await guard.EnsureApprovedAsync($"Type into password field '{element}'", "Password fields are sensitive.", cancellationToken);
         }
@@ -271,7 +293,18 @@ public sealed class DesktopToolProvider(
 
         if (clear && target.Patterns.Value.IsSupported && !target.Patterns.Value.Pattern.IsReadOnly.ValueOrDefault)
         {
-            target.Patterns.Value.Pattern.SetValue(text);
+            var valuePattern = target.Patterns.Value.Pattern;
+            // Passwords are never kept in memory for undo.
+            if (!isPassword && valuePattern.Value.ValueOrDefault is { } previous)
+            {
+                undo?.SetUndo(_ =>
+                {
+                    valuePattern.SetValue(previous);
+                    return Task.FromResult($"Restored the previous text of {element}.");
+                });
+            }
+
+            valuePattern.SetValue(text);
             return $"Set {element} to the text.";
         }
 
@@ -283,13 +316,41 @@ public sealed class DesktopToolProvider(
         }
 
         input.TypeText(text);
+        RecordTypingUndo();
         return $"Typed {text.Length} characters into {element}.";
     }
 
     private string TypeText([Description("Text to type. Use \\n for new lines.")] string text)
     {
         input.TypeText(text);
+        RecordTypingUndo();
         return $"Typed {text.Length} characters into {windows.GetForegroundWindow()?.Title ?? "the foreground window"}.";
+    }
+
+    /// <summary>Typing is undone with Ctrl+Z in the same window (apps may undo it in one or several chunks).</summary>
+    private void RecordTypingUndo()
+    {
+        if (windows.GetForegroundWindow() is not { } window)
+        {
+            return;
+        }
+
+        undo?.SetUndo(async ct =>
+        {
+            ActivateOrThrow(window);
+            await Task.Delay(150, ct);
+            input.SendKeys("ctrl+z");
+            return $"Pressed Ctrl+Z in {window.Title}.";
+        });
+    }
+
+    /// <summary>Undo sends keys, so it must never land in whatever window happens to be in front.</summary>
+    private void ActivateOrThrow(WindowInfo window)
+    {
+        if (!windows.Activate(window.Handle))
+        {
+            throw new InvalidOperationException($"Could not bring \"{window.Title}\" to the front (it may be closed).");
+        }
     }
 
     private string SendKeys([Description("Key chords, e.g. 'ctrl+s' or 'ctrl+shift+p'.")] string keys)

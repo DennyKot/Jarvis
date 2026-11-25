@@ -7,6 +7,8 @@ using Jarvis.Automation.Browser.Extension;
 using Jarvis.Core.Agent;
 using Jarvis.Core.Configuration;
 using Jarvis.Core.Llm;
+using Jarvis.Core.Safety;
+using Jarvis.Core.Tools;
 using Jarvis.Voice;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -24,6 +26,8 @@ public sealed class JarvisController(
     GlobalHotkeys hotkeys,
     ChromeExtensionInstaller extensionInstaller,
     ILlmWarmup warmup,
+    UndoJournal undoJournal,
+    IActionGuard actionGuard,
     IOptions<JarvisOptions> options,
     ILogger<JarvisController> logger)
 {
@@ -51,8 +55,10 @@ public sealed class JarvisController(
         pointer.Pointing += target => OnUi(() => avatar.LookAt(target));
 
         avatar.TalkRequested += Talk;
-        avatar.TypeRequested += ShowCommandWindow;
+        avatar.TypeRequested += () => ShowCommandWindow();
         avatar.StopRequested += Stop;
+        avatar.UndoRequested += Undo;
+        avatar.DryRunRequested += () => ShowCommandWindow("dry run: ");
         avatar.ResetRequested += ResetConversation;
         avatar.ExtensionInstallRequested += InstallExtension;
         avatar.SettingsRequested += OpenSettings;
@@ -63,8 +69,9 @@ public sealed class JarvisController(
         var keys = options.Value.Hotkeys;
         var failed = new List<string>();
         if (!hotkeys.Register(keys.Talk, Talk)) failed.Add(keys.Talk);
-        if (!hotkeys.Register(keys.Type, ShowCommandWindow)) failed.Add(keys.Type);
+        if (!hotkeys.Register(keys.Type, () => ShowCommandWindow())) failed.Add(keys.Type);
         if (!hotkeys.Register(keys.Stop, Stop)) failed.Add(keys.Stop);
+        if (!hotkeys.Register(keys.Undo, Undo)) failed.Add(keys.Undo);
 
         wakeWord.Detected += OnWakeWord;
         wakeWord.Start();
@@ -193,7 +200,7 @@ public sealed class JarvisController(
             }
 
             status.PostUserMessage(command);
-            await Task.Run(() => agent.RunAsync(command, cts.Token), cts.Token);
+            await Task.Run(() => ExecuteAsync(command, cts.Token), cts.Token);
             status.SetState(AssistantState.Idle);
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
@@ -219,11 +226,81 @@ public sealed class JarvisController(
         }
     }
 
-    private void ShowCommandWindow()
+    /// <summary>
+    /// "dry run: …" only shows the plan. With Safety:PreviewPlan (confirm modes) every command is planned first and
+    /// runs for real only after the user approves the plan.
+    /// </summary>
+    private async Task ExecuteAsync(string command, CancellationToken cancellationToken)
+    {
+        var dryRun = DryRunCommand.TryParse(command, out var rest);
+        var safety = options.Value.Safety;
+        if (!dryRun && (!safety.PreviewPlan || safety.Mode == SafetyMode.Autonomous))
+        {
+            await agent.RunAsync(command, cancellationToken);
+            return;
+        }
+
+        var plan = await agent.PreviewAsync(dryRun ? rest : command, cancellationToken);
+        if (dryRun || plan.Actions.Count == 0)
+        {
+            // Without actions the dry run already answered the question with read-only tools.
+            status.PostAssistantMessage(plan.Format());
+            return;
+        }
+
+        try
+        {
+            await actionGuard.EnsureApprovedAsync(plan.Format(),
+                "Planned with a dry run; nothing has been done yet. Steps marked ⚠ will still ask before they run.",
+                cancellationToken, "🔍  Run this plan?");
+        }
+        catch (ActionDeniedException)
+        {
+            status.PostAssistantMessage("Okay, I didn't do anything.");
+            return;
+        }
+
+        await agent.RunAsync(command, cancellationToken);
+    }
+
+    public void Undo()
+    {
+        if (IsBusy)
+        {
+            avatar.ShowActivity($"I'm still working. Press {options.Value.Hotkeys.Stop} to stop me first.");
+            return;
+        }
+
+        _ = UndoAsync();
+    }
+
+    private async Task UndoAsync()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        _run = cts;
+        try
+        {
+            status.SetState(AssistantState.Acting);
+            status.ReportActivity("Undoing the last action…");
+            var message = await Task.Run(() => undoJournal.UndoLastAsync(cts.Token), cts.Token);
+            OnUi(() => avatar.ShowReply(message));
+        }
+        catch (OperationCanceledException)
+        {
+            OnUi(() => avatar.ShowReply("Stopped."));
+        }
+        finally
+        {
+            status.SetState(AssistantState.Idle);
+            _run = null;
+        }
+    }
+
+    private void ShowCommandWindow(string? initialText = null)
     {
         OnUi(() =>
         {
-            var window = new CommandWindow();
+            var window = new CommandWindow(initialText);
             window.Submitted += Submit;
             window.Show();
         });

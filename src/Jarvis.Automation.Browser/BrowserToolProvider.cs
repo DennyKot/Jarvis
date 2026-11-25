@@ -17,7 +17,8 @@ public sealed class BrowserToolProvider(
     IActionGuard guard,
     RiskPolicy riskPolicy,
     IOptions<JarvisOptions> options,
-    ILogger<BrowserToolProvider> logger) : IToolProvider
+    ILogger<BrowserToolProvider> logger,
+    UndoJournal? undo = null) : IToolProvider
 {
     private const float ActionTimeoutMs = 8000;
     private const float ClickTimeoutMs = 2500;
@@ -55,12 +56,14 @@ public sealed class BrowserToolProvider(
         CancellationToken cancellationToken = default)
     {
         url = NormalizeUrl(url);
+        var before = await CaptureAsync(cancellationToken);
 
         var page = newTab ? await session.NewPageAsync(cancellationToken) : await session.GetActivePageAsync(cancellationToken);
         await page.BringToFrontAsync();
         await ActivateChromeWindowAsync(page);
         await page.GotoAsync(url, new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 30000 });
         await SettleAsync(page);
+        await RecordPageUndoAsync(before, cancellationToken);
         return await DescribePageAsync(page, "Opened " + page.Url, full: true);
     }
 
@@ -82,6 +85,7 @@ public sealed class BrowserToolProvider(
         await PointAtAsync(page, locator, doubleClick ? PointerAction.DoubleClick : PointerAction.Click, element, cancellationToken);
 
         var pagesBefore = page.Context.Pages.Count;
+        var before = await CaptureAsync(cancellationToken);
         await ClickWithFallbackAsync(locator, doubleClick);
 
         await SettleAsync(page);
@@ -89,9 +93,11 @@ public sealed class BrowserToolProvider(
         {
             session.SetActivePage(popup);
             await SettleAsync(popup);
+            await RecordPageUndoAsync(before, cancellationToken);
             return await DescribePageAsync(popup, $"Clicked {element}; it opened a new tab", full: true);
         }
 
+        await RecordPageUndoAsync(before, cancellationToken);
         return await DescribePageAsync(page, $"Clicked {element}");
     }
 
@@ -107,10 +113,20 @@ public sealed class BrowserToolProvider(
         var locator = await ResolveAsync(page, @ref);
 
         var type = await locator.GetAttributeAsync("type", new() { Timeout = 2000 });
-        if (string.Equals(type, "password", StringComparison.OrdinalIgnoreCase))
+        var isPassword = string.Equals(type, "password", StringComparison.OrdinalIgnoreCase);
+        if (isPassword)
         {
             await guard.EnsureApprovedAsync($"Type into password field '{element}'", "Password fields are sensitive.", cancellationToken);
         }
+
+        // Passwords are never kept in memory for undo.
+        var previous = isPassword ? null : await TryGetValueAsync(locator);
+        Func<CancellationToken, Task<string>>? restore = previous is null ? null : async _ =>
+        {
+            await locator.FillAsync(previous, new() { Timeout = ActionTimeoutMs });
+            return $"Restored the previous text of {element}.";
+        };
+        var before = await CaptureAsync(cancellationToken);
 
         await PointAtAsync(page, locator, PointerAction.Type, element, cancellationToken);
         if (clear)
@@ -127,6 +143,7 @@ public sealed class BrowserToolProvider(
             var urlBefore = page.Url;
             await locator.PressAsync("Enter", new() { Timeout = ActionTimeoutMs });
             await SettleAsync(page);
+            await RecordPageUndoAsync(before, cancellationToken, restore);
             if (page.Url == urlBefore)
             {
                 return await DescribePageAsync(page, $"Typed into {element} and pressed Enter");
@@ -136,6 +153,11 @@ public sealed class BrowserToolProvider(
             var snapshot = await DescribePageAsync(page, $"Typed into {element}, pressed Enter and it opened a new page", full: true);
             var excerpt = await page.EvaluateAsync<string>(PageScripts.ReadText, NavigationExcerptLength);
             return $"{snapshot}\nPage text (start):\n{excerpt}";
+        }
+
+        if (restore is not null)
+        {
+            undo?.SetUndo(restore);
         }
 
         return $"Typed {text.Length} characters into {element}.";
@@ -149,6 +171,7 @@ public sealed class BrowserToolProvider(
     {
         var page = await session.GetActivePageAsync(cancellationToken);
         var locator = await ResolveAsync(page, @ref);
+        var previous = await TryGetValueAsync(locator);
         await PointAtAsync(page, locator, PointerAction.Click, element, cancellationToken);
         try
         {
@@ -160,6 +183,15 @@ public sealed class BrowserToolProvider(
         }
 
         await SettleAsync(page);
+        if (previous is not null)
+        {
+            undo?.SetUndo(async _ =>
+            {
+                await locator.SelectOptionAsync(new SelectOptionValue { Value = previous }, new() { Timeout = ActionTimeoutMs });
+                return $"Restored the previous choice in {element}.";
+            });
+        }
+
         return $"Selected '{value}' in {element}.";
     }
 
@@ -168,8 +200,10 @@ public sealed class BrowserToolProvider(
         CancellationToken cancellationToken = default)
     {
         var page = await session.GetActivePageAsync(cancellationToken);
+        var before = await CaptureAsync(cancellationToken);
         await page.Keyboard.PressAsync(keys);
         await SettleAsync(page);
+        await RecordPageUndoAsync(before, cancellationToken);
         return $"Pressed {keys}. Page: {await SafeTitleAsync(page)} ({page.Url})";
     }
 
@@ -185,14 +219,17 @@ public sealed class BrowserToolProvider(
             PointerAction.Scroll, $"Scroll {direction}", cancellationToken);
         await page.EvaluateAsync("(dy) => window.scrollBy({ top: dy, behavior: 'smooth' })", sign * screens * viewport.InnerHeight * 0.85);
         await Task.Delay(600, cancellationToken);
+        undo?.SkipRecording();
         return await DescribePageAsync(page, $"Scrolled {direction}");
     }
 
     private async Task<string> BackAsync(CancellationToken cancellationToken = default)
     {
         var page = await session.GetActivePageAsync(cancellationToken);
+        var before = await CaptureAsync(cancellationToken);
         await page.GoBackAsync(new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 15000 });
         await SettleAsync(page);
+        await RecordPageUndoAsync(before, cancellationToken);
         return await DescribePageAsync(page, "Went back", full: true);
     }
 
@@ -230,9 +267,11 @@ public sealed class BrowserToolProvider(
 
             case "switch":
                 var target = pages[index!.Value];
+                var before = await CaptureAsync(cancellationToken);
                 session.SetActivePage(target);
                 await target.BringToFrontAsync();
                 await ActivateChromeWindowAsync(target);
+                await RecordPageUndoAsync(before, cancellationToken);
                 return await DescribePageAsync(target, $"Switched to tab {index}", full: true);
 
             case "close":
@@ -240,6 +279,7 @@ public sealed class BrowserToolProvider(
                 return $"Closed tab {index}.";
 
             default:
+                undo?.SkipRecording();
                 var active = await session.GetActivePageAsync(cancellationToken);
                 var builder = new StringBuilder();
                 for (var i = 0; i < pages.Count; i++)
@@ -249,6 +289,81 @@ public sealed class BrowserToolProvider(
                 }
 
                 return builder.ToString();
+        }
+    }
+
+    private sealed record PageState(IPage Page, string Url, IReadOnlyList<IPage> Pages);
+
+    private async Task<PageState> CaptureAsync(CancellationToken cancellationToken)
+    {
+        var page = await session.GetActivePageAsync(cancellationToken);
+        return new PageState(page, page.Url, await session.GetPagesAsync(cancellationToken));
+    }
+
+    /// <summary>
+    /// Undo for actions that may change tabs or navigate: close a tab they opened, switch back to the previous tab,
+    /// or return to the previous URL; otherwise <paramref name="sameUrlUndo"/> (if any).
+    /// </summary>
+    private async Task RecordPageUndoAsync(PageState before, CancellationToken cancellationToken,
+        Func<CancellationToken, Task<string>>? sameUrlUndo = null)
+    {
+        if (undo is null)
+        {
+            return;
+        }
+
+        var after = await session.GetActivePageAsync(cancellationToken);
+        if (after != before.Page)
+        {
+            var opened = !before.Pages.Contains(after);
+            undo.SetUndo(async _ =>
+            {
+                if (opened && !after.IsClosed)
+                {
+                    await after.CloseAsync();
+                }
+
+                if (before.Page.IsClosed)
+                {
+                    return opened ? "Closed the tab it opened." : "The previous tab is already closed.";
+                }
+
+                session.SetActivePage(before.Page);
+                await before.Page.BringToFrontAsync();
+                await ActivateChromeWindowAsync(before.Page);
+                return opened ? "Closed the tab it opened." : "Switched back to the previous tab.";
+            });
+        }
+        else if (after.Url != before.Url)
+        {
+            undo.SetUndo(async _ =>
+            {
+                if (before.Page.IsClosed)
+                {
+                    return "That tab is already closed.";
+                }
+
+                await before.Page.GotoAsync(before.Url, new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 30000 });
+                await SettleAsync(before.Page);
+                return $"Went back to {before.Url}.";
+            });
+        }
+        else if (sameUrlUndo is not null)
+        {
+            undo.SetUndo(sameUrlUndo);
+        }
+    }
+
+    /// <summary>Current value of an input, textarea or select; null for other elements.</summary>
+    private static async Task<string?> TryGetValueAsync(ILocator locator)
+    {
+        try
+        {
+            return await locator.InputValueAsync(new() { Timeout = 1500 });
+        }
+        catch (Exception ex) when (ex is PlaywrightException or TimeoutException)
+        {
+            return null;
         }
     }
 

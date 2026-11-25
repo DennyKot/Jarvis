@@ -1,4 +1,5 @@
 using Jarvis.Automation.Desktop.Apps;
+using Jarvis.Automation.Desktop.Files;
 using Jarvis.Automation.Desktop.Input;
 using Jarvis.Automation.Desktop.Screen;
 using Jarvis.Automation.Desktop.UiAutomation;
@@ -20,6 +21,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ScreenCaptureService>();
         services.AddSingleton<OcrService>();
         services.AddSingleton<IToolProvider, DesktopToolProvider>();
+        services.AddSingleton<IToolProvider, ClipboardFileToolProvider>();
         return services;
     }
 }

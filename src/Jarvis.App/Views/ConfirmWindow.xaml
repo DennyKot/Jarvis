@@ -10,8 +10,10 @@
             <DropShadowEffect Color="#FFB020" BlurRadius="24" ShadowDepth="0" Opacity="0.45" />
         </Border.Effect>
         <StackPanel>
-            <TextBlock Text="⚠  Allow this action?" Foreground="#FFB020" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,8" />
-            <TextBlock x:Name="ActionText" Foreground="White" FontSize="14" TextWrapping="Wrap" Margin="0,0,0,6" />
+            <TextBlock x:Name="TitleText" Text="⚠  Allow this action?" Foreground="#FFB020" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,8" />
+            <ScrollViewer MaxHeight="320" VerticalScrollBarVisibility="Auto" Margin="0,0,0,6">
+                <TextBlock x:Name="ActionText" Foreground="White" FontSize="14" TextWrapping="Wrap" />
+            </ScrollViewer>
             <TextBlock x:Name="ReasonText" Foreground="#9AA7D6" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,14" />
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button x:Name="DenyButton" Content="Deny (Esc)" IsCancel="True" Padding="14,6" Margin="0,0,8,0"

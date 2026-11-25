@@ -90,6 +90,7 @@ public class WebTextTests
         Assert.DoesNotContain("Unrelated", result);
         Assert.DoesNotContain("Demographics", result);
         Assert.Contains(handler.Requests, u => u.Host == "en.wikipedia.org");
+        Assert.EndsWith("\nSource: [Wikipedia](https://en.wikipedia.org/wiki/Kyiv)", result);
     }
 
     private sealed class StubHandler(Func<Uri, HttpResponseMessage> respond) : HttpMessageHandler

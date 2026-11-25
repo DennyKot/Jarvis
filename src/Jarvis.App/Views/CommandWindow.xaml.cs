@@ -6,13 +6,18 @@ namespace Jarvis.App.Views;
 /// <summary>Type a command instead of speaking it. Enter sends, Esc closes.</summary>
 public partial class CommandWindow : Window
 {
-    public CommandWindow()
+    public CommandWindow(string? initialText = null)
     {
         InitializeComponent();
         Loaded += (_, _) =>
         {
             Activate();
             Input.Focus();
+            if (initialText is not null)
+            {
+                Input.Text = initialText;
+                Input.CaretIndex = initialText.Length;
+            }
         };
         Closing += (_, _) => _closing = true;
         Deactivated += (_, _) => SafeClose();

@@ -11,7 +11,7 @@ public sealed class ConfirmationService(AvatarWindow avatar) : IConfirmationServ
     {
         var window = await avatar.Dispatcher.InvokeAsync(() =>
         {
-            var confirm = new ConfirmWindow(request.Action, request.Reason);
+            var confirm = new ConfirmWindow(request.Action, request.Reason, request.Title);
             confirm.Loaded += (_, _) =>
             {
                 confirm.Left = Math.Max(SystemParameters.WorkArea.Left, avatar.Left + avatar.Width - confirm.ActualWidth - 20);

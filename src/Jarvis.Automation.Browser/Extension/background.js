@@ -275,6 +275,37 @@ async function handle(cmd, a) {
       return tabs.map((t, index) => ({ index, title: t.title || '', url: t.url || '', current: t.id === current.id }));
     }
 
+    case 'state': {
+      const tab = await currentTab();
+      return { tabId: tab.id, url: tab.url || '' };
+    }
+
+    case 'value': {
+      const tab = await currentTab();
+      return await exec(tab.id, (ref) => {
+        const el = document.querySelector(`[data-jarvis-ref="${ref}"]`);
+        if (!el) return { missing: true };
+        const hasValue = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement;
+        return hasValue ? { value: el.value } : {};
+      }, [a.ref]);
+    }
+
+    case 'restoreTab': {
+      const tab = await chrome.tabs.get(a.tabId);
+      await focusTab(tab);
+      currentTabId = tab.id;
+      if (a.url && tab.url !== a.url) {
+        await chrome.tabs.update(tab.id, { url: a.url });
+        await waitLoaded(tab.id);
+      }
+      return null;
+    }
+
+    case 'closeTab': {
+      await chrome.tabs.remove(a.tabId);
+      return null;
+    }
+
     default:
       throw new Error(`Unknown command '${cmd}'.`);
   }

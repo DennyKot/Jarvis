@@ -4,7 +4,7 @@ using Microsoft.Extensions.Options;
 
 namespace Jarvis.Core.Safety;
 
-public sealed record ConfirmationRequest(string Action, string Reason);
+public sealed record ConfirmationRequest(string Action, string Reason, string? Title = null);
 
 /// <summary>Implemented by the UI: asks the user to allow or deny an action.</summary>
 public interface IConfirmationService
@@ -18,8 +18,9 @@ public sealed class ActionDeniedException(string action)
 /// <summary>Lets the agent and individual tools ask for permission before doing something risky.</summary>
 public interface IActionGuard
 {
+    /// <param name="title">Card heading; null = the default "Allow this action?".</param>
     /// <exception cref="ActionDeniedException">The user denied the action or did not answer in time.</exception>
-    Task EnsureApprovedAsync(string action, string reason, CancellationToken cancellationToken);
+    Task EnsureApprovedAsync(string action, string reason, CancellationToken cancellationToken, string? title = null);
 }
 
 public sealed class ActionGuard(
@@ -27,7 +28,7 @@ public sealed class ActionGuard(
     AssistantStatus status,
     IOptions<JarvisOptions> options) : IActionGuard
 {
-    public async Task EnsureApprovedAsync(string action, string reason, CancellationToken cancellationToken)
+    public async Task EnsureApprovedAsync(string action, string reason, CancellationToken cancellationToken, string? title = null)
     {
         var safety = options.Value.Safety;
         if (safety.Mode == SafetyMode.Autonomous)
@@ -37,7 +38,7 @@ public sealed class ActionGuard(
 
         var previous = status.State;
         status.SetState(AssistantState.Confirming);
-        status.ReportActivity($"Waiting for your permission: {action}");
+        status.ReportActivity(title is null ? $"Waiting for your permission: {action}" : title);
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(safety.ConfirmationTimeout);
@@ -45,7 +46,7 @@ public sealed class ActionGuard(
         bool approved;
         try
         {
-            approved = await confirmationService.ConfirmAsync(new ConfirmationRequest(action, reason), timeout.Token);
+            approved = await confirmationService.ConfirmAsync(new ConfirmationRequest(action, reason, title), timeout.Token);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {

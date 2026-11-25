@@ -12,13 +12,46 @@ namespace Jarvis.Core.Agent;
 public interface IAgentRunner
 {
     Task<string> RunAsync(string command, CancellationToken cancellationToken);
+
+    /// <summary>Dry run: plans the command with read-only tools only; actions are recorded, not executed.</summary>
+    Task<AgentPlan> PreviewAsync(string command, CancellationToken cancellationToken);
+
     void ResetConversation();
+}
+
+/// <param name="RiskReason">Why the action would need confirmation, or null if it would run without asking.</param>
+public sealed record PlannedAction(string Description, string? RiskReason);
+
+public sealed record AgentPlan(IReadOnlyList<PlannedAction> Actions, string Summary)
+{
+    public string Format()
+    {
+        if (Actions.Count == 0)
+        {
+            return Summary;
+        }
+
+        var builder = new System.Text.StringBuilder("Dry run — nothing was changed. Planned actions:\n");
+        for (var i = 0; i < Actions.Count; i++)
+        {
+            builder.Append(i + 1).Append(". ").Append(Actions[i].RiskReason is null ? "" : "⚠ ").AppendLine(Actions[i].Description);
+        }
+
+        return builder.Append('\n').Append(Summary).ToString().TrimEnd();
+    }
 }
 
 /// <summary>Runs the "think → call tools → observe" loop until the model gives a final answer.</summary>
 public sealed class AgentRunner : IAgentRunner
 {
     private const string ObservationMarker = "jarvis.observation";
+
+    internal const string DryRunInstruction =
+        "[DRY RUN: action tools are simulated and change nothing; read-only tools work normally. " +
+        "Call the actions you would take, in order, then reply with a one-sentence summary of the plan.]\n";
+
+    private readonly UndoJournal _undo;
+    private List<PlannedAction>? _plan;
     private readonly IChatClientFactory _clientFactory;
     private readonly IReadOnlyDictionary<string, JarvisTool> _tools;
     private readonly RiskPolicy _riskPolicy;
@@ -48,9 +81,11 @@ public sealed class AgentRunner : IAgentRunner
         IOptions<JarvisOptions> options,
         ILogger<AgentRunner> logger,
         TimeProvider? timeProvider = null,
-        UserProfileService? userProfile = null)
+        UserProfileService? userProfile = null,
+        UndoJournal? undo = null)
     {
         _userProfile = userProfile;
+        _undo = undo ?? new UndoJournal();
         _clientFactory = clientFactory;
         _riskPolicy = riskPolicy;
         _actionGuard = actionGuard;
@@ -83,7 +118,7 @@ public sealed class AgentRunner : IAgentRunner
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(_options.Llm.RunTimeout);
-            return await RunCoreAsync(command, timeout.Token);
+            return await RunCoreAsync(command, dryRun: false, timeout.Token);
         }
         finally
         {
@@ -91,7 +126,27 @@ public sealed class AgentRunner : IAgentRunner
         }
     }
 
-    private async Task<string> RunCoreAsync(string command, CancellationToken cancellationToken)
+    public async Task<AgentPlan> PreviewAsync(string command, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(command);
+
+        await _runLock.WaitAsync(cancellationToken);
+        _plan = [];
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(_options.Llm.RunTimeout);
+            var summary = await RunCoreAsync(DryRunInstruction + command, dryRun: true, timeout.Token);
+            return new AgentPlan(_plan, summary);
+        }
+        finally
+        {
+            _plan = null;
+            _runLock.Release();
+        }
+    }
+
+    private async Task<string> RunCoreAsync(string command, bool dryRun, CancellationToken cancellationToken)
     {
         _client ??= _clientFactory.Create(_options.Llm);
         _observations.Drain();
@@ -120,11 +175,19 @@ public sealed class AgentRunner : IAgentRunner
         }
         finally
         {
-            RememberTurn(messages.Skip(turnStart));
+            // A dry run must not leave simulated "done" actions in the conversation.
+            if (!dryRun)
+            {
+                RememberTurn(messages.Skip(turnStart));
+            }
         }
 
-        _logger.LogInformation("Answer: {Answer}", answer);
-        _status.PostAssistantMessage(answer);
+        _logger.LogInformation("{Kind}: {Answer}", dryRun ? "Plan" : "Answer", answer);
+        if (!dryRun)
+        {
+            _status.PostAssistantMessage(answer);
+        }
+
         return answer;
     }
 
@@ -135,6 +198,7 @@ public sealed class AgentRunner : IAgentRunner
         _totalInputTokens = 0;
         _totalOutputTokens = 0;
         string? lastTool = null;
+        string? sourceLine = null;
         for (var step = 1; step <= _options.Llm.MaxSteps; step++)
         {
             _status.SetState(AssistantState.Thinking);
@@ -164,7 +228,10 @@ public sealed class AgentRunner : IAgentRunner
             if (calls.Count == 0)
             {
                 _logger.LogInformation("Command used {In} input + {Out} output tokens in {Steps} step(s)", _totalInputTokens, _totalOutputTokens, step);
-                return string.IsNullOrWhiteSpace(response.Text) ? "Done." : response.Text.Trim();
+                var answer = string.IsNullOrWhiteSpace(response.Text) ? "Done." : response.Text.Trim();
+                return sourceLine is null || answer.Contains("http", StringComparison.OrdinalIgnoreCase)
+                    ? answer
+                    : answer + "\n" + sourceLine;
             }
 
             // Only the newest page snapshot / UI tree matters; older ones just burn context.
@@ -181,6 +248,10 @@ public sealed class AgentRunner : IAgentRunner
                     ? $"You already called {call.Name} with the same arguments {_repeatCount - 1} times in a row. " +
                       "Do something different, or give your final answer."
                     : await InvokeToolAsync(call, cancellationToken);
+                if (call.Name == "web_lookup" && result.LastIndexOf("\n" + WebLookupToolProvider.SourcePrefix, StringComparison.Ordinal) is var at and >= 0)
+                {
+                    sourceLine = result[(at + 1)..].Trim();
+                }
                 messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(call.CallId, result)]));
             }
 
@@ -273,6 +344,13 @@ public sealed class AgentRunner : IAgentRunner
         try
         {
             var assessment = _riskPolicy.Evaluate(tool, arguments.AsReadOnly());
+            if (_plan is not null && tool.Risk != ToolRisk.ReadOnly)
+            {
+                _plan.Add(new PlannedAction(description, assessment.RequiresConfirmation ? assessment.Reason : null));
+                _status.ReportActivity($"Planning: {description}");
+                return $"Dry run: not executed. Assume \"{description}\" worked and continue; don't repeat it.";
+            }
+
             if (assessment.RequiresConfirmation)
             {
                 await _actionGuard.EnsureApprovedAsync(description, assessment.Reason, cancellationToken);
@@ -281,7 +359,10 @@ public sealed class AgentRunner : IAgentRunner
             _status.SetState(tool.Risk == ToolRisk.ReadOnly ? AssistantState.Thinking : AssistantState.Acting);
             _status.ReportActivity(description);
 
-            var result = await tool.Function.InvokeAsync(new AIFunctionArguments(arguments), cancellationToken);
+            var functionArguments = new AIFunctionArguments(arguments);
+            var result = tool.Risk == ToolRisk.ReadOnly || tool.Name == UndoToolProvider.ToolName
+                ? await tool.Function.InvokeAsync(functionArguments, cancellationToken)
+                : await _undo.TrackAsync(description, () => tool.Function.InvokeAsync(functionArguments, cancellationToken).AsTask());
             return result switch
             {
                 null => "OK",
