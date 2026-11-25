@@ -36,7 +36,7 @@ public sealed class ExtensionBrowserToolProvider(
         JarvisTool.Create(PressAsync, "browser_press", "Press key in page, e.g. 'Enter', 'Escape'."),
         JarvisTool.Create(ScrollAsync, "browser_scroll", "Scroll page."),
         JarvisTool.Create(BackAsync, "browser_back", "Go back in history."),
-        JarvisTool.Create(ReadTextAsync, "browser_read_text", "Read page text (or one element by ref).", ToolRisk.ReadOnly),
+        JarvisTool.Create(ReadTextAsync, "browser_read_text", "Read page main text (or one element by ref); pass query to get only matching paragraphs.", ToolRisk.ReadOnly),
         JarvisTool.Create(TabsAsync, "browser_tabs", "List/switch/new/close tabs."),
     ];
 
@@ -94,7 +94,7 @@ public sealed class ExtensionBrowserToolProvider(
         await PointAsync(target, PointerAction.Type, element, cancellationToken);
         await SendToElementAsync("type", new { @ref = Ref(@ref), text, clear, submit }, cancellationToken);
         return submit
-            ? await DescribeAsync($"Typed into {element} and pressed Enter", full: false, cancellationToken)
+            ? await DescribeAsync($"Typed into {element} and pressed Enter", full: false, cancellationToken, excerptOnNavigation: true)
             : $"Typed {text.Length} characters into {element}.";
     }
 
@@ -138,13 +138,17 @@ public sealed class ExtensionBrowserToolProvider(
         return await DescribeAsync("Went back", full: true, cancellationToken);
     }
 
-    private async Task<string> ReadTextAsync([Description("Optional ref")] string? @ref = null, CancellationToken cancellationToken = default)
+    private async Task<string> ReadTextAsync(
+        [Description("Optional ref")] string? @ref = null,
+        [Description("Keywords: return only matching paragraphs")] string? query = null,
+        CancellationToken cancellationToken = default)
     {
         await EnsureConnectedAsync(cancellationToken);
+        var max = string.IsNullOrWhiteSpace(query) ? Options.ReadTextLimit : TextQuery.SourceLimit;
         var result = await bridge.SendAsync("readText",
-            new { @ref = string.IsNullOrWhiteSpace(@ref) ? null : Ref(@ref), max = Options.ReadTextLimit }, cancellationToken);
+            new { @ref = string.IsNullOrWhiteSpace(@ref) ? null : Ref(@ref), max }, cancellationToken);
         return result.ValueKind == JsonValueKind.String
-            ? result.GetString()!
+            ? TextQuery.Filter(result.GetString()!, query, Options.ReadTextLimit)
             : $"Ref '{@ref}' no longer exists; take a new snapshot.";
     }
 
@@ -212,7 +216,7 @@ public sealed class ExtensionBrowserToolProvider(
         }
     }
 
-    private async Task<string> DescribeAsync(string? header, bool full, CancellationToken cancellationToken)
+    private async Task<string> DescribeAsync(string? header, bool full, CancellationToken cancellationToken, bool excerptOnNavigation = false)
     {
         var json = await bridge.SendAsync("snapshot", new { limit = Options.SnapshotElementLimit, textBudget = 1500 }, cancellationToken);
         var builder = new StringBuilder();
@@ -247,6 +251,16 @@ public sealed class ExtensionBrowserToolProvider(
         if (json.GetProperty("truncated").GetBoolean())
         {
             builder.AppendLine("…(more elements below; scroll to see them)");
+        }
+
+        if (excerptOnNavigation)
+        {
+            // Searches usually land on the answer page: include its text so the model can answer without browser_read_text.
+            var excerpt = await bridge.SendAsync("readText", new { @ref = (string?)null, max = BrowserToolProvider.NavigationExcerptLength }, cancellationToken);
+            if (excerpt.ValueKind == JsonValueKind.String)
+            {
+                builder.AppendLine().AppendLine("Page text (start):").AppendLine(excerpt.GetString());
+            }
         }
 
         return builder.ToString();

@@ -16,6 +16,7 @@ public class AgentRunnerTests
     private readonly IConfirmationService _confirmation = Substitute.For<IConfirmationService>();
     private readonly AgentObservations _observations = new();
     private readonly List<string> _invocations = [];
+    private readonly AssistantStatus _status = new();
 
     private AgentRunner CreateRunner(int maxSteps = 10, params JarvisTool[] tools)
     {
@@ -24,7 +25,7 @@ public class AgentRunnerTests
         factory.Create(Arg.Any<LlmOptions>()).Returns(_client);
         var provider = Substitute.For<IToolProvider>();
         provider.GetTools().Returns(tools);
-        var status = new AssistantStatus();
+        var status = _status;
         return new AgentRunner(factory, [provider], new RiskPolicy(options), new ActionGuard(_confirmation, status, options),
             status, _observations, options, NullLogger<AgentRunner>.Instance);
     }
@@ -41,6 +42,43 @@ public class AgentRunnerTests
 
     private static ChatResponse Text(string text) => new(new ChatMessage(ChatRole.Assistant, text));
 
+    private JarvisTool NamedTool(string name) =>
+        JarvisTool.Create((string element) =>
+        {
+            _invocations.Add(name);
+            return "ok";
+        }, name, name);
+
+    [Fact]
+    public async Task RunAsync_RevealsWebTools_AfterBrowserOpen()
+    {
+        // Arrange
+        _client.Enqueue(Call("browser_open", "Wikipedia"), Text("Opened."));
+        var runner = CreateRunner(tools: [NamedTool("browser_open"), NamedTool("browser_click"), NamedTool("ui_click")]);
+
+        // Act
+        await runner.RunAsync("open wikipedia", TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(["browser_open"], _client.ToolNames[0]);
+        Assert.Equal(["browser_open", "browser_click"], _client.ToolNames[1]);
+    }
+
+    [Fact]
+    public async Task RunAsync_InvokesHiddenTool_WhenModelCallsItDirectly()
+    {
+        // Arrange
+        _client.Enqueue(Call("ui_click", "OK button"), Text("Clicked."));
+        var runner = CreateRunner(tools: [NamedTool("launch_app"), NamedTool("ui_click")]);
+
+        // Act
+        await runner.RunAsync("click ok", TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal(["ui_click"], _invocations);
+        Assert.Contains("ui_click", _client.ToolNames[1]);
+    }
+
     [Fact]
     public async Task RunAsync_ReturnsFinalAnswer_AfterInvokingRequestedTool()
     {
@@ -56,6 +94,22 @@ public class AgentRunnerTests
         Assert.Equal(["Search button"], _invocations);
         var toolResult = _client.Requests[1].SelectMany(m => m.Contents).OfType<FunctionResultContent>().Single();
         Assert.Equal("clicked Search button", toolResult.Result);
+    }
+
+    [Fact]
+    public async Task RunAsync_StreamsOnlyFinalAnswer_WhenStepsCallTools()
+    {
+        // Arrange
+        var streamed = new List<string>();
+        _status.ReplyStreamed += streamed.Add;
+        _client.Enqueue(Call("click", "Search button"), Text("Done searching."));
+        var runner = CreateRunner(tools: ClickTool());
+
+        // Act
+        await runner.RunAsync("search something", TestContext.Current.CancellationToken);
+
+        // Assert
+        Assert.Equal("Done searching.", streamed.Last());
     }
 
     [Fact]
@@ -242,6 +296,8 @@ public class AgentRunnerTests
 
         public List<List<ChatMessage>> Requests { get; } = [];
 
+        public List<string[]> ToolNames { get; } = [];
+
         public void Enqueue(params ChatResponse[] responses)
         {
             foreach (var response in responses)
@@ -253,11 +309,18 @@ public class AgentRunnerTests
         public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
         {
             Requests.Add(messages.ToList());
+            ToolNames.Add(options?.Tools?.Select(t => t.Name).ToArray() ?? []);
             return Task.FromResult(_responses.Count > 0 ? _responses.Dequeue() : Text("(no more scripted responses)"));
         }
 
-        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var response = await GetResponseAsync(messages, options, cancellationToken);
+            foreach (var update in response.ToChatResponseUpdates())
+            {
+                yield return update;
+            }
+        }
 
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
 

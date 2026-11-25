@@ -30,6 +30,7 @@ public sealed class AgentRunner : IAgentRunner
     private readonly TimeProvider _timeProvider;
     private readonly UserProfileService? _userProfile;
     private readonly List<ChatMessage> _history = [];
+    private readonly HashSet<ToolGroup> _activeGroups = [ToolGroup.Core];
     private readonly SemaphoreSlim _runLock = new(1, 1);
     private IChatClient? _client;
     private string? _lastCallSignature;
@@ -68,6 +69,8 @@ public sealed class AgentRunner : IAgentRunner
         lock (_history)
         {
             _history.Clear();
+            _activeGroups.Clear();
+            _activeGroups.Add(ToolGroup.Core);
         }
     }
 
@@ -104,10 +107,10 @@ public sealed class AgentRunner : IAgentRunner
 
         var chatOptions = new ChatOptions
         {
-            Tools = _tools.Values.Select(t => (AITool)t.Function).ToList(),
+            Tools = VisibleTools(),
             Temperature = _options.Llm.Temperature,
             MaxOutputTokens = _options.Llm.MaxOutputTokens,
-            AllowMultipleToolCalls = false,
+            AllowMultipleToolCalls = _options.Llm.AllowMultipleToolCalls,
         };
 
         string answer;
@@ -131,13 +134,20 @@ public sealed class AgentRunner : IAgentRunner
         _repeatCount = 0;
         _totalInputTokens = 0;
         _totalOutputTokens = 0;
+        string? lastTool = null;
         for (var step = 1; step <= _options.Llm.MaxSteps; step++)
         {
             _status.SetState(AssistantState.Thinking);
-            _status.ReportActivity(step == 1 ? "Thinking…" : $"Thinking… (step {step})");
+            _status.ReportActivity(lastTool switch
+            {
+                null => "Thinking…",
+                "web_lookup" => "Reading the web results…",
+                "browser_read_text" or "browser_open" => "Reading the page…",
+                _ => $"Thinking… (step {step})",
+            });
 
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-            var response = await _client!.GetResponseAsync(messages, chatOptions, cancellationToken);
+            var response = await GetStreamedResponseAsync(messages, chatOptions, cancellationToken);
             messages.AddRange(response.Messages);
 
             var calls = response.Messages
@@ -159,6 +169,7 @@ public sealed class AgentRunner : IAgentRunner
 
             // Only the newest page snapshot / UI tree matters; older ones just burn context.
             CompactToolResults(messages);
+            lastTool = calls[^1].Name;
 
             foreach (var call in calls)
             {
@@ -171,6 +182,11 @@ public sealed class AgentRunner : IAgentRunner
                       "Do something different, or give your final answer."
                     : await InvokeToolAsync(call, cancellationToken);
                 messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(call.CallId, result)]));
+            }
+
+            if (ActivateGroups(calls))
+            {
+                chatOptions.Tools = VisibleTools();
             }
 
             var images = _observations.Drain();
@@ -194,6 +210,53 @@ public sealed class AgentRunner : IAgentRunner
         }
 
         return $"I stopped after {_options.Llm.MaxSteps} steps without finishing. Tell me how to continue.";
+    }
+
+    /// <summary>Tools sent to the model; kept in a stable order so the prompt prefix stays cacheable.</summary>
+    private List<AITool> VisibleTools() =>
+        _tools.Values
+            .Where(t => !_options.Llm.DynamicTools || _activeGroups.Contains(ToolGroups.Of(t.Name)))
+            .Select(t => (AITool)t.Function)
+            .ToList();
+
+    /// <summary>Hidden tools stay callable; using one (or an entry point like browser_open) reveals its group.</summary>
+    private bool ActivateGroups(IEnumerable<FunctionCallContent> calls)
+    {
+        var changed = false;
+        foreach (var call in calls.Where(c => _tools.ContainsKey(c.Name)))
+        {
+            foreach (var group in ToolGroups.ActivatedBy(call.Name, _options.Browser.Mode))
+            {
+                changed |= _activeGroups.Add(group);
+            }
+        }
+
+        return changed && _options.Llm.DynamicTools;
+    }
+
+    /// <summary>Streams the response so a final answer shows up in the bubble while it is still being generated.</summary>
+    private async Task<ChatResponse> GetStreamedResponseAsync(List<ChatMessage> messages, ChatOptions chatOptions, CancellationToken cancellationToken)
+    {
+        var updates = new List<ChatResponseUpdate>();
+        var text = new System.Text.StringBuilder();
+        var hasToolCall = false;
+        await foreach (var update in _client!.GetStreamingResponseAsync(messages, chatOptions, cancellationToken))
+        {
+            updates.Add(update);
+            hasToolCall |= update.Contents.Any(c => c is FunctionCallContent);
+            if (hasToolCall || string.IsNullOrEmpty(update.Text))
+            {
+                continue;
+            }
+
+            text.Append(update.Text);
+            if (text.ToString().Trim() is { Length: > 0 } soFar)
+            {
+                _status.StreamReply(soFar);
+            }
+        }
+
+        return updates.ToChatResponse();
     }
 
     internal async Task<string> InvokeToolAsync(FunctionCallContent call, CancellationToken cancellationToken)
@@ -244,7 +307,19 @@ public sealed class AgentRunner : IAgentRunner
 
     internal static string Describe(JarvisTool tool, IDictionary<string, object?> arguments)
     {
-        foreach (var key in tool.DescriptiveArguments.Concat(["element", "url", "name", "title", "keys"]))
+        if (tool.Name == "web_lookup" && arguments.TryGetValue("query", out var query) && query?.ToString() is { Length: > 0 } q)
+        {
+            return $"Searching the web: {(q.Length > 60 ? q[..60] + "…" : q)}";
+        }
+
+        if (tool.Name == "browser_read_text")
+        {
+            return arguments.TryGetValue("query", out var find) && find?.ToString() is { Length: > 0 } f
+                ? $"Reading the page for: {(f.Length > 60 ? f[..60] + "…" : f)}"
+                : "Reading the page…";
+        }
+
+        foreach (var key in tool.DescriptiveArguments.Concat(["element", "url", "query", "name", "title", "keys"]))
         {
             if (arguments.TryGetValue(key, out var value) && value?.ToString() is { Length: > 0 } text)
             {

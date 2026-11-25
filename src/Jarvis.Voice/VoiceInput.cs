@@ -68,6 +68,7 @@ public static class ServiceCollectionExtensions
                 _ => sp.GetRequiredService<HybridTranscriber>(),
             });
         services.AddSingleton<VoiceInput>();
+        services.AddSingleton<WakeWordListener>();
         return services;
     }
 }

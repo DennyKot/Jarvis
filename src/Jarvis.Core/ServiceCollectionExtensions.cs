@@ -17,6 +17,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<IChatClientFactory, ChatClientFactory>();
         services.AddSingleton<OllamaSetup>();
+        services.TryAddSingleton<ILlmWarmup, LlmWarmup>();
         services.TryAddSingleton<IPointerService, NullPointerService>();
         services.TryAddSingleton<IWindowActivator, NullWindowActivator>();
         services.AddSingleton<AssistantStatus>();
@@ -24,6 +25,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<UserProfileService>();
         services.AddSingleton<RiskPolicy>();
         services.AddSingleton<IActionGuard, ActionGuard>();
+        services.AddSingleton<IToolProvider, WebLookupToolProvider>();
         services.AddSingleton<IAgentRunner, AgentRunner>();
         return services;
     }

@@ -51,6 +51,10 @@ public partial class AvatarWindow : Window
 
         var pulse = new DoubleAnimation(1, 0.25, TimeSpan.FromMilliseconds(600)) { AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever };
         ActivityDot.BeginAnimation(OpacityProperty, pulse);
+
+        // Keep the bubble open while the user reaches for a source link.
+        Bubble.MouseEnter += (_, _) => _bubbleTimer.Stop();
+        Bubble.MouseLeave += (_, _) => ScheduleHide(TimeSpan.FromSeconds(4));
     }
 
     public event Action? TalkRequested;
@@ -128,12 +132,49 @@ public partial class AvatarWindow : Window
 
     public void ShowReply(string text, bool isError = false)
     {
-        ReplyText.Text = text;
+        SetReplyText(text);
         ReplyText.Foreground = isError ? new SolidColorBrush(Color.FromRgb(0xFF, 0x8A, 0x8A)) : Brushes.White;
         ReplyText.Visibility = Visibility.Visible;
         ActivityPanel.Visibility = Visibility.Collapsed;
         ShowBubble();
         ScheduleHide(TimeSpan.FromSeconds(Math.Clamp(text.Length / 12.0, 6, 25)));
+    }
+
+    public void ShowPartialReply(string text)
+    {
+        SetReplyText(text);
+        ReplyText.Foreground = Brushes.White;
+        ReplyText.Visibility = Visibility.Visible;
+        ActivityPanel.Visibility = Visibility.Collapsed;
+        ShowBubble();
+    }
+
+    /// <summary>Renders [Site](url) and bare URLs as clickable links that open in the default browser.</summary>
+    private void SetReplyText(string text)
+    {
+        ReplyText.Inlines.Clear();
+        foreach (var segment in ReplyLinks.Parse(text))
+        {
+            if (segment.Url is null)
+            {
+                ReplyText.Inlines.Add(new System.Windows.Documents.Run(segment.Text));
+                continue;
+            }
+
+            var link = new System.Windows.Documents.Hyperlink(new System.Windows.Documents.Run(segment.Text))
+            {
+                NavigateUri = segment.Url,
+                Foreground = new SolidColorBrush(Color.FromRgb(0x00, 0xE5, 0xFF)),
+                Cursor = Cursors.Hand,
+                ToolTip = segment.Url.ToString(),
+            };
+            link.RequestNavigate += (_, e) =>
+            {
+                using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(e.Uri.AbsoluteUri) { UseShellExecute = true });
+                e.Handled = true;
+            };
+            ReplyText.Inlines.Add(link);
+        }
     }
 
     public void ClearBubble()

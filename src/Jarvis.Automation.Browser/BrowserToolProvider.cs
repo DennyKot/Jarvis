@@ -20,6 +20,8 @@ public sealed class BrowserToolProvider(
     ILogger<BrowserToolProvider> logger) : IToolProvider
 {
     private const float ActionTimeoutMs = 8000;
+    private const float ClickTimeoutMs = 2500;
+    internal const int NavigationExcerptLength = 1200;
 
     private readonly System.Runtime.CompilerServices.ConditionalWeakTable<IPage, PageSnapshot> _snapshots = new();
 
@@ -43,7 +45,7 @@ public sealed class BrowserToolProvider(
         JarvisTool.Create(ScrollAsync, "browser_scroll", "Scroll page."),
         JarvisTool.Create(BackAsync, "browser_back", "Go back in history."),
         JarvisTool.Create(ReadTextAsync, "browser_read_text",
-            "Read page text (or one element by ref).", ToolRisk.ReadOnly),
+            "Read page main text (or one element by ref); pass query to get only matching paragraphs.", ToolRisk.ReadOnly),
         JarvisTool.Create(TabsAsync, "browser_tabs", "List/switch/new/close tabs."),
     ];
 
@@ -80,14 +82,7 @@ public sealed class BrowserToolProvider(
         await PointAtAsync(page, locator, doubleClick ? PointerAction.DoubleClick : PointerAction.Click, element, cancellationToken);
 
         var pagesBefore = page.Context.Pages.Count;
-        if (doubleClick)
-        {
-            await locator.DblClickAsync(new() { Timeout = ActionTimeoutMs });
-        }
-        else
-        {
-            await locator.ClickAsync(new() { Timeout = ActionTimeoutMs });
-        }
+        await ClickWithFallbackAsync(locator, doubleClick);
 
         await SettleAsync(page);
         if (page.Context.Pages.Count > pagesBefore && page.Context.Pages[^1] is { IsClosed: false } popup)
@@ -129,9 +124,18 @@ public sealed class BrowserToolProvider(
 
         if (submit)
         {
+            var urlBefore = page.Url;
             await locator.PressAsync("Enter", new() { Timeout = ActionTimeoutMs });
             await SettleAsync(page);
-            return await DescribePageAsync(page, $"Typed into {element} and pressed Enter");
+            if (page.Url == urlBefore)
+            {
+                return await DescribePageAsync(page, $"Typed into {element} and pressed Enter");
+            }
+
+            // Searches usually land on the answer page: include its text so the model can answer without browser_read_text.
+            var snapshot = await DescribePageAsync(page, $"Typed into {element}, pressed Enter and it opened a new page", full: true);
+            var excerpt = await page.EvaluateAsync<string>(PageScripts.ReadText, NavigationExcerptLength);
+            return $"{snapshot}\nPage text (start):\n{excerpt}";
         }
 
         return $"Typed {text.Length} characters into {element}.";
@@ -194,17 +198,19 @@ public sealed class BrowserToolProvider(
 
     private async Task<string> ReadTextAsync(
         [Description("Optional ref")] string? @ref = null,
+        [Description("Keywords: return only matching paragraphs")] string? query = null,
         CancellationToken cancellationToken = default)
     {
         var page = await session.GetActivePageAsync(cancellationToken);
         if (!string.IsNullOrWhiteSpace(@ref))
         {
             var text = await (await ResolveAsync(page, @ref)).InnerTextAsync(new() { Timeout = ActionTimeoutMs });
-            return text.Length > Options.ReadTextLimit ? text[..Options.ReadTextLimit] + "\n…(truncated)" : text;
+            return TextQuery.Filter(text, query, Options.ReadTextLimit);
         }
 
-        var body = await page.EvaluateAsync<string>(PageScripts.ReadText, Options.ReadTextLimit);
-        return $"{await SafeTitleAsync(page)} ({page.Url})\n{body}";
+        var max = string.IsNullOrWhiteSpace(query) ? Options.ReadTextLimit : TextQuery.SourceLimit;
+        var body = await page.EvaluateAsync<string>(PageScripts.ReadText, max);
+        return $"{await SafeTitleAsync(page)} ({page.Url})\n{TextQuery.Filter(body, query, Options.ReadTextLimit)}";
     }
 
     private async Task<string> TabsAsync(
@@ -293,6 +299,42 @@ public sealed class BrowserToolProvider(
         }
 
         return builder.ToString();
+    }
+
+    /// <summary>
+    /// A real mouse click is preferred, but Playwright waits up to the full timeout when the element is hidden or covered
+    /// (overlays, collapsed menus); then the DOM click usually still works and saves the model a step.
+    /// </summary>
+    private static async Task ClickWithFallbackAsync(ILocator locator, bool doubleClick)
+    {
+        if (await locator.IsVisibleAsync())
+        {
+            try
+            {
+                if (doubleClick)
+                {
+                    await locator.DblClickAsync(new() { Timeout = ClickTimeoutMs });
+                }
+                else
+                {
+                    await locator.ClickAsync(new() { Timeout = ClickTimeoutMs });
+                }
+
+                return;
+            }
+            catch (TimeoutException)
+            {
+            }
+        }
+
+        await locator.EvaluateAsync(
+            """
+            (e, dbl) => {
+              e.scrollIntoView({ block: 'center' });
+              e.click();
+              if (dbl) { e.click(); e.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); }
+            }
+            """, doubleClick);
     }
 
     private async Task<ILocator> ResolveAsync(IPage page, string reference)

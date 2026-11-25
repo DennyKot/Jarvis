@@ -135,6 +135,17 @@ internal static class PageScripts
 
     public const string Viewport = "() => ({ innerWidth: window.innerWidth, innerHeight: window.innerHeight, devicePixelRatio: window.devicePixelRatio })";
 
-    /// <summary>Argument: maxLength. Returns the readable text of the page body.</summary>
-    public const string ReadText = "(max) => { const t = (document.body?.innerText || '').replace(/\\n{3,}/g, '\\n\\n'); return t.length > max ? t.slice(0, max) + '\\n…(truncated)' : t; }";
+    /// <summary>
+    /// Argument: maxLength. Returns the readable text of the page's main content (skipping menus/sidebars when the page
+    /// marks its main region), falling back to the whole body.
+    /// </summary>
+    public const string ReadText = """
+        (max) => {
+          const body = document.body?.innerText || '';
+          const main = [...document.querySelectorAll('main, [role=main], article, #content, #main')]
+            .map(e => e.innerText || '').find(t => t.length > 500 || t.length > body.length * 0.3);
+          const t = (main || body).replace(/\n{3,}/g, '\n\n');
+          return t.length > max ? t.slice(0, max) + '\n…(truncated)' : t;
+        }
+        """;
 }

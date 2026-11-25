@@ -52,6 +52,18 @@ public sealed class LlmOptions
 
     /// <summary>Context window requested from Ollama (num_ctx). Ignored by cloud providers.</summary>
     public int ContextLength { get; set; } = 16384;
+
+    /// <summary>Lets the model batch independent actions (e.g. filling several form fields) into one step.</summary>
+    public bool AllowMultipleToolCalls { get; set; } = true;
+
+    /// <summary>
+    /// Sends a small core tool set first and adds the web or desktop tool groups once the model starts using them
+    /// (browser_open / launch_app / ...). Saves several thousand tokens per step. Off = always send every tool.
+    /// </summary>
+    public bool DynamicTools { get; set; } = true;
+
+    /// <summary>How long Ollama keeps the model loaded after a request (e.g. "30m", "-1" = forever). Ignored by cloud providers.</summary>
+    public string KeepAlive { get; set; } = "30m";
 }
 
 public sealed class UserOptions
@@ -84,6 +96,12 @@ public sealed class VoiceOptions
     public int MaxRecordingSeconds { get; set; } = 30;
     public float SilenceThreshold { get; set; } = 0.015f;
     public string? ModelDirectory { get; set; }
+
+    /// <summary>Listen in the background for a wake phrase ("Hey Jarvis") as an alternative to the talk hotkey.</summary>
+    public bool WakeWordEnabled { get; set; }
+
+    /// <summary>Phrases that wake Jarvis when an utterance starts with them (case/punctuation-insensitive).</summary>
+    public string[] WakeWords { get; set; } = ["hey jarvis", "hi jarvis", "ok jarvis", "okay jarvis", "jarvis", "привіт джарвіс", "джарвіс"];
 }
 
 public sealed class HotkeyOptions
@@ -118,8 +136,8 @@ public sealed class BrowserOptions
     /// <summary>Chrome 136+ refuses remote debugging on the default profile, so Jarvis uses its own.</summary>
     public string? ProfileDirectory { get; set; }
 
-    public int SnapshotElementLimit { get; set; } = 100;
-    public int ReadTextLimit { get; set; } = 4000;
+    public int SnapshotElementLimit { get; set; } = 60;
+    public int ReadTextLimit { get; set; } = 2500;
 }
 
 public enum SafetyMode

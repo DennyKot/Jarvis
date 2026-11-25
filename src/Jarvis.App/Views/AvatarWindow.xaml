@@ -25,7 +25,7 @@
 
         <!-- Speech bubble -->
         <Grid x:Name="Bubble" Grid.Row="0" VerticalAlignment="Bottom" HorizontalAlignment="Right" Margin="0,0,30,-4"
-              Opacity="0" IsHitTestVisible="False">
+              Opacity="0" IsHitTestVisible="{Binding IsVisible, ElementName=ReplyText}">
             <Grid.RenderTransform>
                 <TranslateTransform x:Name="BubbleTranslate" />
             </Grid.RenderTransform>

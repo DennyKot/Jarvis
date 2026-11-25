@@ -66,7 +66,7 @@ public sealed class DesktopToolProvider(
         JarvisTool.Create(UserBrowserOpenAsync, "browser_open",
             "Open URL in the user's Chrome (new tab by default). Returns page elements with ids [uN] for ui_click/ui_type."),
         JarvisTool.Create(UserBrowserSnapshot, "browser_snapshot", "Page elements of the user's Chrome tab with ids [uN].", ToolRisk.ReadOnly),
-        JarvisTool.Create(UserBrowserReadTextAsync, "browser_read_text", "Read the text of the page in the user's Chrome.", ToolRisk.ReadOnly),
+        JarvisTool.Create(UserBrowserReadTextAsync, "browser_read_text", "Read the text of the page in the user's Chrome; pass query to get only matching paragraphs.", ToolRisk.ReadOnly),
     ];
 
     private async Task<string> UserBrowserOpenAsync(
@@ -114,21 +114,23 @@ public sealed class DesktopToolProvider(
             : $"Window: {chrome.Title}\n{tree}";
     }
 
-    private async Task<string> UserBrowserReadTextAsync(CancellationToken cancellationToken = default)
+    private async Task<string> UserBrowserReadTextAsync(
+        [Description("Keywords: return only matching paragraphs")] string? query = null,
+        CancellationToken cancellationToken = default)
     {
         var chrome = FindUserChrome() ?? throw new InvalidOperationException("No Chrome window is open.");
         var limit = options.Value.Browser.ReadTextLimit;
-        var text = uia.ReadDocumentText(chrome.Handle, limit);
+        var text = uia.ReadDocumentText(chrome.Handle, string.IsNullOrWhiteSpace(query) ? limit : TextQuery.SourceLimit);
         if (!string.IsNullOrWhiteSpace(text))
         {
-            return $"{chrome.Title}\n{text}";
+            return $"{chrome.Title}\n{TextQuery.Filter(text, query, limit)}";
         }
 
         // Fall back to OCR for pages that do not expose text (canvas apps, PDFs).
         using var bitmap = capture.CaptureBitmap(chrome.Bounds);
         var lines = await ocr.RecognizeAsync(bitmap, chrome.Bounds, null, cancellationToken);
         var ocrText = string.Join('\n', lines.Select(l => l.Text));
-        return $"{chrome.Title} (OCR)\n{(ocrText.Length > limit ? ocrText[..limit] : ocrText)}";
+        return $"{chrome.Title} (OCR)\n{TextQuery.Filter(ocrText, query, limit)}";
     }
 
     /// <summary>The user's Chrome window: the current one if Jarvis is already working in it, otherwise the topmost.</summary>

@@ -86,6 +86,7 @@ The first web command starts Chrome with a dedicated profile in `%LOCALAPPDATA%\
 | Action | How |
 |---|---|
 | Talk | `Ctrl+Space` (press again to finish early), double-click the robot, or click the tray icon |
+| Wake word (opt-in) | Say *"Hey Jarvis"* and then your command, or *"Hey Jarvis, open notepad"* in one go (`Voice:WakeWordEnabled`) |
 | Type a command | `Ctrl+Alt+J` |
 | Stop the current task | `Ctrl+Alt+X` |
 | Menu (new conversation, settings, logs, exit) | Right-click the robot |
@@ -119,17 +120,22 @@ Examples: *"Open Wikipedia and tell me the population of Kyiv"*, *"Відкри�
 | `Llm:MaxSteps` | 30 | Max tool-calling steps per command |
 | `Llm:RunTimeout` | 5 min | Per command |
 | `Llm:ContextLength` | 16384 | Context window requested from Ollama (it otherwise truncates long prompts) |
+| `Llm:KeepAlive` | 30m | How long Ollama keeps the model loaded (`-1` = forever). Jarvis also preloads it at startup and when you press Talk |
 | `Llm:HistoryMessageLimit` | 40 | Conversation memory between commands |
+| `Llm:AllowMultipleToolCalls` | true | Lets the model batch independent actions (e.g. filling several form fields) in one step |
+| `Llm:DynamicTools` | true | Sends a small core tool set first and adds the web/desktop tools once the model uses `browser_open` / `launch_app` / `focus_window` (saves tokens every step) |
 | `User:Name` | auto | Your name. If not set, it is detected once at first start from the Windows account and Chrome/Edge Google profiles (by majority vote), cached in `%LOCALAPPDATA%\Jarvis\user-profile.json`; only the name goes into the prompt |
 | `Voice:Engine` | `Hybrid` | `Hybrid` (Parakeet; Cyrillic results re-done by Whisper limited to `AllowedLanguages`, since Parakeet mistakes Ukrainian for Russian), `Parakeet` or `Whisper` |
 | `Voice:WhisperModel` | `small` | `tiny`, `base`, `small`, `medium`, `large-v3`, `large-v3-turbo` (`medium`+ is better for Ukrainian) |
 | `Voice:Language` / `AllowedLanguages` | `auto` / `en, uk` | Detection is restricted to the allowed languages |
 | `Voice:SilenceTimeoutMs` | 1500 | Recording stops after this much silence |
+| `Voice:WakeWordEnabled` / `WakeWords` | `false` / `hey jarvis, jarvis, джарвіс...` | Listen in the background (locally, paused while Jarvis works) and react to utterances that start with a wake phrase. Costs some CPU: every speech segment is transcribed |
 | `Hotkeys:Talk/Type/Stop` | see above | Any `Ctrl/Alt/Shift/Win + Key` |
 | `Browser:Mode` | `JarvisProfile` | `JarvisProfile`: Jarvis' own Chrome window (DevTools). `Extension`: your Chrome via the Jarvis Bridge extension (recommended). `UserWindow`: your Chrome driven like a desktop app |
 | `Browser:ExtensionPort` | 17345 | Local port the extension connects to |
 | `Browser:DebugPort` | 9222 | Chrome remote debugging port |
-| `Browser:SnapshotElementLimit` | 150 | Interactive elements per page snapshot |
+| `Browser:SnapshotElementLimit` | 60 | Interactive elements per page snapshot |
+| `Browser:ReadTextLimit` | 2500 | Max characters returned by `browser_read_text` / `web_lookup` |
 | `Ui:HideFromScreenCapture` | true | See Privacy |
 | `Ui:Sounds` | true | Cute robot chimes on listen / done / confirm / error |
 
@@ -164,7 +170,7 @@ Set `Jarvis:Browser:Mode` to `UserWindow` to let Jarvis drive your Chrome like a
 
 - `browser_open` opens the URL in a **new tab** (your current tab is left alone) through the address bar.
 - `browser_snapshot` lists the page's elements via Windows UI Automation (ids `[uN]`), used with `ui_click` / `ui_type`.
-- `browser_read_text` reads the page text (UI Automation, falling back to OCR).
+- `browser_read_text` reads the page text (UI Automation, falling back to OCR); with `query` it returns only matching paragraphs.
 - When an element is not exposed, the model falls back to `ocr` + `click_at`, and to `screenshot` + `click_at` last.
 
 Trade-offs: the Chrome window comes to the front, keyboard input goes to it (don't type while Jarvis works), and the
@@ -179,6 +185,7 @@ Only `idle.json` is required; missing states fall back to it.
 
 ## Tools available to the model
 
+- **Web**: `web_lookup` (searches Wikipedia + DuckDuckGo over HTTP and returns readable text; no browser needed)
 - **Browser**: `browser_open`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_select_option`,
   `browser_press`, `browser_scroll`, `browser_back`, `browser_read_text`, `browser_tabs`
 - **Desktop**: `launch_app`, `list_windows`, `focus_window`, `ui_tree`, `ui_find`, `ui_click`, `ui_type`,
@@ -192,6 +199,9 @@ Only `idle.json` is required; missing states fall back to it.
 - Lowering `Llm:ContextLength` reduces Ollama's memory use (more of the model stays on the GPU), at the cost of shorter memory.
 - Browser actions return only what changed on the page; full snapshots are sent only after navigation or `browser_snapshot`.
   Only the latest screenshot is kept, and older tool results are truncated.
+- Factual questions take ~2 steps with `web_lookup`. `browser_type` with `submit=true` that lands on a new page returns
+  its snapshot plus the start of its main text, and `browser_read_text(query=…)` returns only matching paragraphs.
+- Tools are sent in groups (`Llm:DynamicTools`): desktop tools are not sent on web tasks and vice versa.
 - Each step's token usage and duration are logged (`LLM step N: …, tokens in=… out=…`).
 
 ## Limitations

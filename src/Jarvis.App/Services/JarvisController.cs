@@ -6,6 +6,7 @@ using Jarvis.App.Views;
 using Jarvis.Automation.Browser.Extension;
 using Jarvis.Core.Agent;
 using Jarvis.Core.Configuration;
+using Jarvis.Core.Llm;
 using Jarvis.Voice;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -18,9 +19,11 @@ public sealed class JarvisController(
     PointerService pointer,
     AssistantStatus status,
     VoiceInput voice,
+    WakeWordListener wakeWord,
     IAgentRunner agent,
     GlobalHotkeys hotkeys,
     ChromeExtensionInstaller extensionInstaller,
+    ILlmWarmup warmup,
     IOptions<JarvisOptions> options,
     ILogger<JarvisController> logger)
 {
@@ -44,6 +47,7 @@ public sealed class JarvisController(
                 avatar.ShowReply(text);
             }
         });
+        status.ReplyStreamed += text => OnUi(() => avatar.ShowPartialReply(text));
         pointer.Pointing += target => OnUi(() => avatar.LookAt(target));
 
         avatar.TalkRequested += Talk;
@@ -62,9 +66,15 @@ public sealed class JarvisController(
         if (!hotkeys.Register(keys.Type, ShowCommandWindow)) failed.Add(keys.Type);
         if (!hotkeys.Register(keys.Stop, Stop)) failed.Add(keys.Stop);
 
+        wakeWord.Detected += OnWakeWord;
+        wakeWord.Start();
+        var talkHint = wakeWord.IsEnabled ? $"Say \"Hey Jarvis\" or press {keys.Talk}" : $"Press {keys.Talk}";
+
         avatar.ShowReply(failed.Count == 0
-            ? $"Hi! I'm Jarvis. Press {keys.Talk} and speak, or {keys.Type} to type."
+            ? $"Hi! I'm Jarvis. {talkHint} and speak, or {keys.Type} to type."
             : $"Hi! I'm Jarvis. These hotkeys are taken by other apps: {string.Join(", ", failed)}. Change them in appsettings.json.");
+
+        warmup.WarmUp();
     }
 
     public void Talk()
@@ -81,6 +91,8 @@ public sealed class JarvisController(
             return;
         }
 
+        // Load the model while the user is still speaking.
+        warmup.WarmUp();
         _ = RunAsync(async ct =>
         {
             var transcript = await voice.ListenAsync(ct);
@@ -91,6 +103,23 @@ public sealed class JarvisController(
 
             return transcript.Text;
         });
+    }
+
+    private void OnWakeWord(string command)
+    {
+        if (IsBusy)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(command))
+        {
+            OnUi(Talk);
+        }
+        else
+        {
+            OnUi(() => Submit(command));
+        }
     }
 
     public void Submit(string command)
@@ -119,6 +148,7 @@ public sealed class JarvisController(
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
         _run = cts;
+        wakeWord.Suspend();
         try
         {
             status.SetState(AssistantState.Acting);
@@ -137,6 +167,7 @@ public sealed class JarvisController(
         finally
         {
             _run = null;
+            wakeWord.Resume();
         }
     }
 
@@ -150,6 +181,7 @@ public sealed class JarvisController(
     {
         using var cts = new CancellationTokenSource();
         _run = cts;
+        wakeWord.Suspend();
         try
         {
             var command = await getCommand(cts.Token);
@@ -183,6 +215,7 @@ public sealed class JarvisController(
         finally
         {
             _run = null;
+            wakeWord.Resume();
         }
     }
 

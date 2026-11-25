@@ -94,7 +94,13 @@ public sealed class ChatClientFactory : IChatClientFactory
         // Ollama defaults to a small context window and silently drops the start of longer prompts
         // (system prompt and the user's command), so request a window large enough for tools and page snapshots.
         return new ChatClientBuilder(new OllamaApiClient(http, options.Model))
-            .ConfigureOptions(o => o.AddOllamaOption(OllamaOption.NumCtx, options.ContextLength))
+            .ConfigureOptions(o =>
+            {
+                o.AddOllamaOption(OllamaOption.NumCtx, options.ContextLength);
+
+                // Ollama unloads idle models after 5 minutes; reloading costs 10-20 s on the next command.
+                o.RawRepresentationFactory ??= (Func<IChatClient, object?>)(_ => new OllamaSharp.Models.Chat.ChatRequest { KeepAlive = options.KeepAlive });
+            })
             .Build();
     }
 }
