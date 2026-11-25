@@ -19,7 +19,11 @@ public sealed class WhisperTranscriber(
 
     private VoiceOptions Voice => options.Value.Voice;
 
-    public async Task<Transcript> TranscribeAsync(float[] samples, CancellationToken cancellationToken)
+    public Task<Transcript> TranscribeAsync(float[] samples, CancellationToken cancellationToken) =>
+        TranscribeAsync(samples, language: null, cancellationToken);
+
+    /// <param name="language">Forces this language (skips detection); null uses Voice:Language / AllowedLanguages.</param>
+    public async Task<Transcript> TranscribeAsync(float[] samples, string? language, CancellationToken cancellationToken)
     {
         if (samples.Length < AudioRecorder.SampleRate / 4)
         {
@@ -27,7 +31,7 @@ public sealed class WhisperTranscriber(
         }
 
         var factory = await GetFactoryAsync(cancellationToken);
-        var language = Voice.Language;
+        language ??= Voice.Language;
         var builder = factory.CreateBuilder().WithThreads(Math.Max(2, Environment.ProcessorCount / 2)).WithNoContext();
 
         if (string.Equals(language, "auto", StringComparison.OrdinalIgnoreCase) && Voice.AllowedLanguages.Length > 0)

@@ -37,6 +37,8 @@ dotnet run --project src/Jarvis.App [-- --command "..."] [-- --install-extension
 - Windows 11 Notepad/WinUI garble batched `SendInput` unicode → type one char per `SendInput`.
 - Chromium/Electron (VS Code, Chrome) build the UIA tree lazily → retry once if (almost) empty.
 - Ollama: default context is small and silently truncates → `NumCtx` = `Llm:ContextLength`; HttpClient timeout = `RunTimeout`.
+- Ollama turns thinking on by default for models that support it (gemma4: ~3x output tokens per step) → `Llm:Thinking` (default off) sends `think` on the raw `ChatRequest`. Don't use `OllamaOption.Think` (OllamaSharp 5.5.2 converts it to a string).
+- H.NotifyIcon: `IconSource` only works for file/pack-URI images (throws for `RenderTargetBitmap`) → set `TaskbarIcon.Icon`; it disposes the previous `Icon`, so hand it a new instance each time.
 - Chrome 136+ blocks CDP on the default profile; Chrome 137+ ignores `--load-extension`. Extension install = UIA clicks on chrome://extensions (EN/UK names + ids `devMode`, `loadUnpacked`); folder picker is a `#32770` from a *helper* chrome process, listed under the Chrome window.
 - MV3 service worker sleeps; extension reconnects via alarms (≤30 s). `connected.marker` means "installed".
 - WPF projects lack `System.IO` implicit using; `LibraryImport` needs blittable types (`ushort` not `char`) and `SetLastError`.

@@ -40,8 +40,8 @@ internal static class SystemPrompt
         - Always pass a short "element" description (e.g. "Send button") when clicking or typing.
         - Never guess credentials, enter passwords or buy anything unless the user explicitly asked.
         - If the user denies an action, do not retry it; explain and ask what to do instead.
-        - When done, answer in one or two sentences with the result (and any information the user asked for).
-          If the information came from the web, end with a "Source:" line of Markdown links (at most two),
-          e.g. "Source: [Wikipedia](https://en.wikipedia.org/wiki/Kyiv)".
+        - When done, reply with just the result in at most two short sentences: no lists or extra background unless asked
+          (text the user wants written goes into the tool call, not the reply). If the information came from the web,
+          end with a "Source:" line of Markdown links (at most two), e.g. "Source: [Wikipedia](https://en.wikipedia.org/wiki/Kyiv)".
         """;
 }

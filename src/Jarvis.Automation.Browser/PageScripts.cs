@@ -15,12 +15,13 @@ internal static class PageScripts
           const interactiveRoles = new Set(['button','link','checkbox','radio','tab','menuitem','menuitemcheckbox','menuitemradio',
             'option','switch','combobox','textbox','searchbox','slider','spinbutton','treeitem','listbox']);
           const textTags = new Set(['H1','H2','H3','H4','H5','H6','P','LI','TD','TH','LABEL','BLOCKQUOTE','PRE','FIGCAPTION','DT','DD']);
-          const lines = [];
+          const lines = [], linkKeys = new Set();
           let refCount = 0, textUsed = 0, below = 0, above = 0;
           const vh = window.innerHeight, vw = window.innerWidth;
 
           const clean = s => (s || '').replace(/\s+/g, ' ').trim();
           const cut = (s, n) => s.length > n ? s.slice(0, n) + '…' : s;
+          const mediaHref = /(^|\/)(File|Image|Файл):|\.(jpe?g|png|gif|svg|webp|avif|bmp)([?#]|…|$)/i;
           const shortHref = href => {
             if (!href || href.startsWith('javascript:') || href === '#') return '';
             try {
@@ -85,17 +86,23 @@ internal static class PageScripts
               const far = rect.top > vh * 2 || rect.bottom < -vh;
               if (role && interactiveRoles.has(role) && isVisible(el) && !el.parentElement?.closest('[' + REF + ']:not([contenteditable])')) {
                 if (far) { if (rect.top > 0) below++; else above++; el = walker.nextNode(); continue; }
+                const name = cut(nameOf(el), 80);
+                // Link targets cost many tokens and are rarely needed: show them only for unlabeled links.
+                const href = role === 'link' && !name ? shortHref(el.getAttribute('href') || '') : '';
+                // Unlabeled image/thumbnail links tell the model nothing it could act on.
+                if (href && mediaHref.test(href)) { el = walker.nextNode(); continue; }
+                // Thumbnail + title links to the same target with the same label: one ref is enough.
+                if (role === 'link' && name) {
+                  const key = name + '|' + el.href;
+                  if (linkKeys.has(key)) { el = walker.nextNode(); continue; }
+                  linkKeys.add(key);
+                }
                 refCount++;
                 const ref = el.getAttribute(REF) || ('e' + (++next));
                 el.setAttribute(REF, ref);
                 const r = rect;
-                const name = cut(nameOf(el), 80);
                 let line = '[' + ref + '] ' + role + ' "' + name + '"';
-                // Link targets cost many tokens and are rarely needed: show them only for unlabeled links.
-                if (role === 'link' && !name) {
-                  const href = shortHref(el.getAttribute('href') || '');
-                  if (href) line += ' -> ' + href;
-                }
+                if (href) line += ' -> ' + href;
                 if ('value' in el && el.tagName !== 'BUTTON' && role !== 'button' && el.value) {
                   line += el.type === 'password' ? ' value=<hidden>' : ' value="' + cut(clean(String(el.value)), 80) + '"';
                 }
@@ -105,7 +112,9 @@ internal static class PageScripts
                 if (el.tagName === 'SELECT') line += ' options: ' + cut([...el.options].map(o => o.text).join(' | '), 150);
                 if (r.bottom < 0 || r.top > vh || r.right < 0 || r.left > vw) line += ' (offscreen)';
                 lines.push(line);
-              } else if (!far && textTags.has(el.tagName) && textUsed < textBudget && isVisible(el) && !el.querySelector('p,li,td,h1,h2,h3,h4')) {
+              } else if (!far && textTags.has(el.tagName) && textUsed < textBudget && isVisible(el) && !el.querySelector('p,li,td,h1,h2,h3,h4') &&
+                  // Already in a listed element's name: card links (headline + summary) and labels of form fields.
+                  !el.closest('a[href], [' + REF + ']:not([contenteditable])') && !(el.tagName === 'LABEL' && el.control)) {
                 const text = cut(clean(el.innerText), 300);
                 // Skip blocks that only repeat the labels of the links/buttons inside them (menus, nav lists).
                 const ownText = [...el.querySelectorAll('a,button')].reduce((n, c) => n - clean(c.innerText).length, text.length);
@@ -137,14 +146,27 @@ internal static class PageScripts
 
     /// <summary>
     /// Argument: maxLength. Returns the readable text of the page's main content (skipping menus/sidebars when the page
-    /// marks its main region), falling back to the whole body.
+    /// marks its main region), falling back to the whole body. Short labels of menus/toolbars/buttons inside that region
+    /// and lines repeated verbatim are dropped: they cost tokens and carry no content.
     /// </summary>
     public const string ReadText = """
         (max) => {
           const body = document.body?.innerText || '';
-          const main = [...document.querySelectorAll('main, [role=main], article, #content, #main')]
-            .map(e => e.innerText || '').find(t => t.length > 500 || t.length > body.length * 0.3);
-          const t = (main || body).replace(/\n{3,}/g, '\n\n');
+          const root = [...document.querySelectorAll('main, [role=main], article, #content, #main')]
+            .find(e => { const n = (e.innerText || '').length; return n > 500 || n > body.length * 0.3; }) || document.body;
+          if (!root) return '';
+          const controls = new Set();
+          root.querySelectorAll('nav, [role=navigation], [role=menu], [role=menubar], [role=toolbar], [role=tablist], button, select')
+            .forEach(e => (e.innerText || '').split('\n').forEach(l => { l = l.trim(); if (l && l.length < 60) controls.add(l); }));
+          const seen = new Set(), out = [];
+          for (const raw of (root === document.body ? body : root.innerText || '').split('\n')) {
+            const line = raw.trim();
+            if (!line) { if (out.length && out[out.length - 1] !== '') out.push(''); continue; }
+            if (controls.has(line)) continue;
+            if (line.length >= 3) { if (seen.has(line)) continue; seen.add(line); }
+            out.push(raw.trimEnd());
+          }
+          const t = out.join('\n').trim();
           return t.length > max ? t.slice(0, max) + '\n…(truncated)' : t;
         }
         """;

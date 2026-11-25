@@ -23,6 +23,7 @@ public sealed class BrowserToolProvider(
     private const float ActionTimeoutMs = 8000;
     private const float ClickTimeoutMs = 2500;
     internal const int NavigationExcerptLength = 1200;
+    private const string TextLinePrefix = "text: ";
 
     private readonly System.Runtime.CompilerServices.ConditionalWeakTable<IPage, PageSnapshot> _snapshots = new();
 
@@ -150,9 +151,7 @@ public sealed class BrowserToolProvider(
             }
 
             // Searches usually land on the answer page: include its text so the model can answer without browser_read_text.
-            var snapshot = await DescribePageAsync(page, $"Typed into {element}, pressed Enter and it opened a new page", full: true);
-            var excerpt = await page.EvaluateAsync<string>(PageScripts.ReadText, NavigationExcerptLength);
-            return $"{snapshot}\nPage text (start):\n{excerpt}";
+            return await DescribePageAsync(page, $"Typed into {element}, pressed Enter and it opened a new page", full: true, withExcerpt: true);
         }
 
         if (restore is not null)
@@ -217,8 +216,15 @@ public sealed class BrowserToolProvider(
         var viewport = await GetViewportAsync(page);
         await PointAtViewportAsync(page, new ScreenRect(viewport.InnerWidth / 2 - 1, viewport.InnerHeight / 2 - 1, 2, 2),
             PointerAction.Scroll, $"Scroll {direction}", cancellationToken);
-        await page.EvaluateAsync("(dy) => window.scrollBy({ top: dy, behavior: 'smooth' })", sign * screens * viewport.InnerHeight * 0.85);
-        await Task.Delay(600, cancellationToken);
+        // Wait for the smooth scroll to finish ('scrollend'), at most 600 ms (nothing fires when the page can't scroll).
+        await page.EvaluateAsync(
+            """
+            (dy) => new Promise(resolve => {
+              const timer = setTimeout(resolve, 600);
+              window.addEventListener('scrollend', () => { clearTimeout(timer); resolve(); }, { once: true });
+              window.scrollBy({ top: dy, behavior: 'smooth' });
+            })
+            """, sign * screens * viewport.InnerHeight * 0.85);
         undo?.SkipRecording();
         return await DescribePageAsync(page, $"Scrolled {direction}");
     }
@@ -375,7 +381,7 @@ public sealed class BrowserToolProvider(
             : "https://" + url;
     }
 
-    private async Task<string> DescribePageAsync(IPage page, string? header, bool full = false)
+    private async Task<string> DescribePageAsync(IPage page, string? header, bool full = false, bool withExcerpt = false)
     {
         var json = await page.EvaluateAsync<JsonElement>(PageScripts.Snapshot,
             new { limit = Options.SnapshotElementLimit, textBudget = 1500 });
@@ -403,17 +409,35 @@ public sealed class BrowserToolProvider(
             return builder.Append(diff).ToString();
         }
 
+        var excerpt = withExcerpt ? await page.EvaluateAsync<string>(PageScripts.ReadText, NavigationExcerptLength) : null;
+        return AppendSnapshot(builder, lines, json.GetProperty("truncated").GetBoolean(), excerpt).ToString();
+    }
+
+    /// <summary>
+    /// Writes the snapshot lines and, if given, the start of the page text. The excerpt already holds the page's text,
+    /// so the snapshot's own "text:" lines are left out then (they would repeat it).
+    /// </summary>
+    internal static StringBuilder AppendSnapshot(StringBuilder builder, IReadOnlyList<string> lines, bool truncated, string? excerpt)
+    {
         foreach (var line in lines)
         {
-            builder.AppendLine(line);
+            if (excerpt is null || !line.StartsWith(TextLinePrefix, StringComparison.Ordinal))
+            {
+                builder.AppendLine(line);
+            }
         }
 
-        if (json.GetProperty("truncated").GetBoolean())
+        if (truncated)
         {
             builder.AppendLine("…(more elements below; scroll to see them)");
         }
 
-        return builder.ToString();
+        if (excerpt is not null)
+        {
+            builder.AppendLine().AppendLine("Page text (start):").AppendLine(excerpt);
+        }
+
+        return builder;
     }
 
     /// <summary>

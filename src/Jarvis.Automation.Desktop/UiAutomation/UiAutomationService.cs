@@ -14,6 +14,8 @@ public sealed class UiAutomationService : IDisposable
 {
     private static readonly HashSet<ControlType> Transparent = [ControlType.Pane, ControlType.Group, ControlType.Custom];
     private static readonly HashSet<ControlType> Skipped = [ControlType.ScrollBar, ControlType.Thumb, ControlType.TitleBar, ControlType.Separator];
+    private static readonly TimeSpan LazyTreeWait = TimeSpan.FromMilliseconds(1500);
+    private static readonly TimeSpan LazyTreePollInterval = TimeSpan.FromMilliseconds(250);
 
     private readonly UIA3Automation _automation = new();
     private readonly Dictionary<string, AutomationElement> _elements = new(StringComparer.OrdinalIgnoreCase);
@@ -33,10 +35,11 @@ public sealed class UiAutomationService : IDisposable
             Walk(root, 0, maxDepth, maxElements, budget, stopwatch, builder, ref count);
 
             // Chromium/Electron apps (VS Code, Teams, Chrome) build their accessibility tree only after
-            // the first UI Automation request, so an almost empty tree is worth one more look.
-            if (count < 8)
+            // the first UI Automation request, so look again (for up to LazyTreeWait) while it is almost empty.
+            var waited = Stopwatch.StartNew();
+            while (count < 8 && waited.Elapsed < LazyTreeWait)
             {
-                Thread.Sleep(1500);
+                Thread.Sleep(LazyTreePollInterval);
                 _elements.Clear();
                 builder.Clear();
                 count = 0;
@@ -95,12 +98,15 @@ public sealed class UiAutomationService : IDisposable
     private AutomationElement? FindDocument(nint windowHandle)
     {
         var root = _automation.FromHandle(windowHandle);
-        var document = Safe<AutomationElement>(() => root.FindFirstDescendant(cf => cf.ByControlType(ControlType.Document))!);
-        if (document is null)
+        AutomationElement? Find() => Safe<AutomationElement>(() => root.FindFirstDescendant(cf => cf.ByControlType(ControlType.Document))!);
+
+        // Chromium builds its accessibility tree lazily after the first request: poll for up to LazyTreeWait.
+        var document = Find();
+        var stopwatch = Stopwatch.StartNew();
+        while (document is null && stopwatch.Elapsed < LazyTreeWait)
         {
-            // Chromium builds its accessibility tree lazily after the first request.
-            Thread.Sleep(1500);
-            document = Safe<AutomationElement>(() => root.FindFirstDescendant(cf => cf.ByControlType(ControlType.Document))!);
+            Thread.Sleep(LazyTreePollInterval);
+            document = Find();
         }
 
         return document;
@@ -157,7 +163,7 @@ public sealed class UiAutomationService : IDisposable
     public void Dispose() => _automation.Dispose();
 
     private void Walk(AutomationElement element, int depth, int maxDepth, int maxElements, TimeSpan budget,
-        Stopwatch stopwatch, StringBuilder builder, ref int count)
+        Stopwatch stopwatch, StringBuilder builder, ref int count, string? parentName = null)
     {
         if (count >= maxElements || stopwatch.Elapsed > budget)
         {
@@ -171,6 +177,13 @@ public sealed class UiAutomationService : IDisposable
         }
 
         var name = Safe(() => element.Name) ?? string.Empty;
+
+        // Links/buttons in web pages and many apps hold a Text child that only repeats their name.
+        if (controlType == ControlType.Text && name.Length > 0 && name == parentName)
+        {
+            return;
+        }
+
         var transparent = depth > 0 && Transparent.Contains(controlType) && string.IsNullOrWhiteSpace(name);
         var childDepth = depth;
         if (!transparent)
@@ -188,7 +201,7 @@ public sealed class UiAutomationService : IDisposable
 
         foreach (var child in Safe(() => element.FindAllChildren()) ?? [])
         {
-            Walk(child, childDepth, maxDepth, maxElements, budget, stopwatch, builder, ref count);
+            Walk(child, childDepth, maxDepth, maxElements, budget, stopwatch, builder, ref count, transparent ? parentName : name);
         }
     }
 

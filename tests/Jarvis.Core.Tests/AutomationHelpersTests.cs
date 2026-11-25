@@ -112,6 +112,38 @@ public class AutomationHelpersTests
     }
 
     [Fact]
+    public void AppendSnapshot_OmitsTextLines_WhenExcerptIsIncluded()
+    {
+        // Arrange
+        string[] lines = ["[e1] searchbox \"Search\"", "heading: Kyiv", "text: Kyiv is the capital of Ukraine."];
+
+        // Act
+        var result = BrowserToolProvider.AppendSnapshot(new System.Text.StringBuilder(), lines, truncated: false, "Kyiv is the capital of Ukraine.").ToString();
+
+        // Assert
+        Assert.Contains("[e1] searchbox \"Search\"", result);
+        Assert.Contains("heading: Kyiv", result);
+        Assert.DoesNotContain("text: ", result);
+        Assert.Contains("Page text (start):", result);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(result, "capital of Ukraine"));
+    }
+
+    [Fact]
+    public void AppendSnapshot_KeepsTextLines_WhenNoExcerpt()
+    {
+        // Arrange
+        string[] lines = ["[e1] link \"Home\"", "text: Welcome to the site."];
+
+        // Act
+        var result = BrowserToolProvider.AppendSnapshot(new System.Text.StringBuilder(), lines, truncated: true, excerpt: null).ToString();
+
+        // Assert
+        Assert.Contains("text: Welcome to the site.", result);
+        Assert.Contains("more elements below", result);
+        Assert.DoesNotContain("Page text", result);
+    }
+
+    [Fact]
     public void Describe_ReturnsNull_WhenMostOfThePageChanged()
     {
         // Arrange

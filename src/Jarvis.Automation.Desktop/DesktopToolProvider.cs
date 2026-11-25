@@ -85,8 +85,13 @@ public sealed class DesktopToolProvider(
         if (chrome is null)
         {
             using var _ = Process.Start(new ProcessStartInfo("chrome", url) { UseShellExecute = true });
-            await Task.Delay(3000, cancellationToken);
-            chrome = FindUserChrome() ?? throw new InvalidOperationException("Chrome did not open a window.");
+            var deadline = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 3;
+            while ((chrome = FindUserChrome()) is null && Stopwatch.GetTimestamp() < deadline)
+            {
+                await Task.Delay(200, cancellationToken);
+            }
+
+            chrome ??= FindUserChrome() ?? throw new InvalidOperationException("Chrome did not open a window.");
         }
         else
         {

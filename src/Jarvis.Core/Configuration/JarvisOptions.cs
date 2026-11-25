@@ -46,7 +46,11 @@ public sealed class LlmOptions
 
     public int MaxSteps { get; set; } = 30;
     public float Temperature { get; set; } = 0.2f;
-    public int MaxOutputTokens { get; set; } = 2048;
+    /// <summary>
+    /// Per-step output cap; mostly a guard against runaway generation (local models ~25-30 tok/s). Leaves room for
+    /// several tool calls or a long text argument; raise it when Thinking is on (thinking tokens count too).
+    /// </summary>
+    public int MaxOutputTokens { get; set; } = 1024;
     public int HistoryMessageLimit { get; set; } = 40;
     public TimeSpan RunTimeout { get; set; } = TimeSpan.FromMinutes(5);
 
@@ -64,6 +68,13 @@ public sealed class LlmOptions
 
     /// <summary>How long Ollama keeps the model loaded after a request (e.g. "30m", "-1" = forever). Ignored by cloud providers.</summary>
     public string KeepAlive { get; set; } = "30m";
+
+    /// <summary>
+    /// Lets Ollama reasoning models (gemma4, qwen3, ...) think before answering. Off by default: thinking roughly
+    /// triples the output tokens of a tool call, and output tokens dominate step latency on local models.
+    /// Ignored by cloud providers.
+    /// </summary>
+    public bool Thinking { get; set; }
 }
 
 public sealed class UserOptions
@@ -92,7 +103,8 @@ public sealed class VoiceOptions
     public string Language { get; set; } = "auto";
 
     public string[] AllowedLanguages { get; set; } = ["en", "uk"];
-    public int SilenceTimeoutMs { get; set; } = 1500;
+    /// <summary>Silence after speech that ends the recording. Raise it if commands get cut off at short pauses.</summary>
+    public int SilenceTimeoutMs { get; set; } = 900;
     public int MaxRecordingSeconds { get; set; } = 30;
     public float SilenceThreshold { get; set; } = 0.015f;
     public string? ModelDirectory { get; set; }

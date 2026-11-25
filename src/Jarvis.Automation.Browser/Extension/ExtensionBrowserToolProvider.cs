@@ -275,27 +275,15 @@ public sealed class ExtensionBrowserToolProvider(
             return builder.Append(diff).ToString();
         }
 
-        foreach (var line in lines)
-        {
-            builder.AppendLine(line);
-        }
-
-        if (json.GetProperty("truncated").GetBoolean())
-        {
-            builder.AppendLine("…(more elements below; scroll to see them)");
-        }
-
+        string? excerpt = null;
         if (excerptOnNavigation)
         {
             // Searches usually land on the answer page: include its text so the model can answer without browser_read_text.
-            var excerpt = await bridge.SendAsync("readText", new { @ref = (string?)null, max = BrowserToolProvider.NavigationExcerptLength }, cancellationToken);
-            if (excerpt.ValueKind == JsonValueKind.String)
-            {
-                builder.AppendLine().AppendLine("Page text (start):").AppendLine(excerpt.GetString());
-            }
+            var text = await bridge.SendAsync("readText", new { @ref = (string?)null, max = BrowserToolProvider.NavigationExcerptLength }, cancellationToken);
+            excerpt = text.ValueKind == JsonValueKind.String ? text.GetString() : null;
         }
 
-        return builder.ToString();
+        return BrowserToolProvider.AppendSnapshot(builder, lines, json.GetProperty("truncated").GetBoolean(), excerpt).ToString();
     }
 
     private sealed record ElementLocation(string Name, string Type, ScreenRect Css, ViewportMetrics Viewport, bool Active, string Title);

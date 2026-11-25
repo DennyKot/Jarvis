@@ -1,7 +1,9 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Jarvis.Core.Agent;
+using DrawingIcon = System.Drawing.Icon;
 
 namespace Jarvis.App.Services;
 
@@ -9,15 +11,29 @@ namespace Jarvis.App.Services;
 internal static class TrayIconRenderer
 {
     private const int Size = 64;
-    private static readonly Dictionary<AssistantState, ImageSource> Cache = [];
+    private static readonly Dictionary<AssistantState, byte[]> Cache = [];
 
-    public static ImageSource Render(AssistantState state)
+    /// <summary>
+    /// Creates the icon for TaskbarIcon.Icon. H.NotifyIcon's IconSource only accepts file/resource-backed images
+    /// (it throws NotImplementedException for a RenderTargetBitmap), so the drawing is encoded to ICO bytes once per
+    /// state. A new Icon is returned on every call because TaskbarIcon disposes the previous one when it changes.
+    /// </summary>
+    public static DrawingIcon Render(AssistantState state)
     {
-        if (Cache.TryGetValue(state, out var cached))
+        if (!Cache.TryGetValue(state, out var bytes))
         {
-            return cached;
+            using var ico = H.NotifyIcon.ImageExtensions.ToStream(Draw(state));
+            using var buffer = new MemoryStream();
+            ico.CopyTo(buffer);
+            bytes = buffer.ToArray();
+            Cache[state] = bytes;
         }
 
+        return new DrawingIcon(new MemoryStream(bytes));
+    }
+
+    private static BitmapSource Draw(AssistantState state)
+    {
         var accent = AccentFor(state);
         var accentBrush = Frozen(new SolidColorBrush(accent));
         var glowBrush = Frozen(new RadialGradientBrush(Color.FromArgb(0xC0, accent.R, accent.G, accent.B), Color.FromArgb(0, accent.R, accent.G, accent.B)));
@@ -52,7 +68,6 @@ internal static class TrayIconRenderer
         var bitmap = new RenderTargetBitmap(Size, Size, 96, 96, PixelFormats.Pbgra32);
         bitmap.Render(visual);
         bitmap.Freeze();
-        Cache[state] = bitmap;
         return bitmap;
     }
 

@@ -16,6 +16,15 @@ public interface IChatClientFactory
 
 public sealed class ChatClientFactory : IChatClientFactory
 {
+    private readonly HttpMessageHandler? _ollamaHandler;
+
+    public ChatClientFactory()
+    {
+    }
+
+    /// <summary>Test hook: routes Ollama requests through <paramref name="ollamaHandler"/>.</summary>
+    internal ChatClientFactory(HttpMessageHandler ollamaHandler) => _ollamaHandler = ollamaHandler;
+
     public IChatClient Create(LlmOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -84,12 +93,14 @@ public sealed class ChatClientFactory : IChatClientFactory
             .Build();
     }
 
-    private static IChatClient CreateOllama(LlmOptions options)
+    private IChatClient CreateOllama(LlmOptions options)
     {
         var endpoint = string.IsNullOrWhiteSpace(options.Endpoint) ? "http://localhost:11434" : options.Endpoint;
 
         // Local models can be slow (first load, CPU offloading); the default 100 s HttpClient timeout is too short.
-        var http = new HttpClient { BaseAddress = new Uri(endpoint), Timeout = options.RunTimeout };
+        var http = _ollamaHandler is null ? new HttpClient() : new HttpClient(_ollamaHandler, disposeHandler: false);
+        http.BaseAddress = new Uri(endpoint);
+        http.Timeout = options.RunTimeout;
 
         // Ollama defaults to a small context window and silently drops the start of longer prompts
         // (system prompt and the user's command), so request a window large enough for tools and page snapshots.
@@ -99,7 +110,13 @@ public sealed class ChatClientFactory : IChatClientFactory
                 o.AddOllamaOption(OllamaOption.NumCtx, options.ContextLength);
 
                 // Ollama unloads idle models after 5 minutes; reloading costs 10-20 s on the next command.
-                o.RawRepresentationFactory ??= (Func<IChatClient, object?>)(_ => new OllamaSharp.Models.Chat.ChatRequest { KeepAlive = options.KeepAlive });
+                // Ollama also enables thinking by default for models that support it (gemma4: ~3x the output tokens
+                // per tool call), so send "think" explicitly. Per-request flag: it doesn't reload the model.
+                o.RawRepresentationFactory ??= (Func<IChatClient, object?>)(_ => new OllamaSharp.Models.Chat.ChatRequest
+                {
+                    KeepAlive = options.KeepAlive,
+                    Think = options.Thinking,
+                });
             })
             .Build();
     }

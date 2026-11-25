@@ -166,16 +166,30 @@ public sealed class JarvisController(
         catch (Exception ex)
         {
             logger.LogError(ex, "Extension install failed");
-            status.SetState(AssistantState.Error);
             OnUi(() => avatar.ShowReply(ex.GetBaseException().Message, isError: true));
-            await Task.Delay(2500);
-            status.SetState(AssistantState.Idle);
+            ShowErrorState();
         }
         finally
         {
             _run = null;
             wakeWord.Resume();
         }
+    }
+
+    /// <summary>
+    /// Shows the error look for a moment without keeping Jarvis busy (awaiting it here used to reject the user's
+    /// next command for 2.5 s with "I'm still working").
+    /// </summary>
+    private void ShowErrorState()
+    {
+        status.SetState(AssistantState.Error);
+        _ = Task.Delay(2500).ContinueWith(_ =>
+        {
+            if (status.State == AssistantState.Error)
+            {
+                status.SetState(AssistantState.Idle);
+            }
+        }, TaskScheduler.Default);
     }
 
     public void Stop()
@@ -214,10 +228,8 @@ public sealed class JarvisController(
             var message = ex is OperationCanceledException
                 ? "The AI model took too long to respond. Try again, or use a faster model."
                 : ex.GetBaseException().Message;
-            status.SetState(AssistantState.Error);
             OnUi(() => avatar.ShowReply(message, isError: true));
-            await Task.Delay(2500);
-            status.SetState(AssistantState.Idle);
+            ShowErrorState();
         }
         finally
         {

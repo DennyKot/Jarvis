@@ -61,4 +61,21 @@ public class VoiceTests
         // Assert
         Assert.Equal(expected, result);
     }
+
+    [Theory]
+    [InlineData(new[] { "en", "uk" }, "uk")]
+    [InlineData(new[] { "UK", "en" }, "uk")]
+    [InlineData(new[] { "en", "uk", "ru" }, null)]
+    [InlineData(new[] { "en", "de" }, null)]
+    public void SingleCyrillicLanguage_ReturnsLanguage_WhenExactlyOneCyrillicLanguageIsAllowed(string[] allowed, string? expected)
+    {
+        // Arrange
+        var languages = allowed;
+
+        // Act
+        var result = HybridTranscriber.SingleCyrillicLanguage(languages);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
 }

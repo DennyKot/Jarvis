@@ -211,11 +211,11 @@ public partial class App : Application
         {
             ToolTipText = TrayIconRenderer.Describe(status.State),
             ContextMenu = menu,
-            IconSource = TrayIconRenderer.Render(status.State),
+            Icon = TrayIconRenderer.Render(status.State),
         };
         status.StateChanged += state => Dispatcher.BeginInvoke(() =>
         {
-            tray.IconSource = TrayIconRenderer.Render(state);
+            tray.Icon = TrayIconRenderer.Render(state);
             tray.ToolTipText = TrayIconRenderer.Describe(state);
         });
         tray.TrayLeftMouseUp += (_, _) => controller.Talk();
