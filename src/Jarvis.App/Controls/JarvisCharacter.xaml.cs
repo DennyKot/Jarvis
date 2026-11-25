@@ -33,6 +33,13 @@ public partial class JarvisCharacter : UserControl
     private double _hopVelocity;
     private double _squash;
     private double _squashVelocity;
+    private double _antennaAngle;
+    private double _antennaVelocity;
+    private double _appear;
+    private double _appearVelocity;
+    private double _earScale = 1;
+    private double _rippleOpacity;
+    private double _happyUntil;
     private Color _color = StateColor(AssistantState.Idle);
     private AssistantState _state = AssistantState.Idle;
 
@@ -59,8 +66,16 @@ public partial class JarvisCharacter : UserControl
                 return;
             }
 
+            // Finishing a task: brief happy "^ ^" eyes and a bigger hop.
+            if (value == AssistantState.Idle && _state is AssistantState.Speaking or AssistantState.Acting or AssistantState.Thinking)
+            {
+                _happyUntil = Seconds + 1.4;
+                _hopVelocity -= 50;
+            }
+
             _state = value;
             _stateSince = DateTime.UtcNow;
+            _antennaVelocity += Random.Shared.NextDouble() < 0.5 ? -160 : 160;
 
             // A little reaction on every state change: small hop + squash that springs back.
             _hopVelocity -= value is AssistantState.Error ? 0 : 70;
@@ -101,6 +116,7 @@ public partial class JarvisCharacter : UserControl
         AnimateEyes(t, dt);
         AnimateMouth(t, dt);
         AnimateOrbit(dt);
+        AnimateListening(t, dt);
 
         Badge.Opacity = Approach(Badge.Opacity, _state == AssistantState.Confirming ? 1 : 0, dt * 6);
         Canvas.SetTop(Badge, 4 + Math.Sin(t * 5) * 3);
@@ -148,13 +164,23 @@ public partial class JarvisCharacter : UserControl
             AssistantState.Speaking => Math.Sin(t * 2.1) * 3,
             _ => Math.Sin(t * 0.9) * 2,
         };
+        var previousTilt = _tilt;
         _tilt = Damp(_tilt, tilt + _look.X * 0.6, 5, dt);
         BodyRotate.Angle = _tilt;
 
+        // Antenna follow-through: a spring on its base that lags behind head tilt and gets kicked on state changes.
+        _antennaVelocity += (-120 * _antennaAngle - 9 * _antennaVelocity) * dt - (_tilt - previousTilt) * 25;
+        _antennaAngle = Math.Clamp(_antennaAngle + _antennaVelocity * dt, -25, 25);
+        AntennaRotate.Angle = _antennaAngle;
+
+        // Pop-in on first show (underdamped spring 0 -> 1, overshoots slightly).
+        _appearVelocity += (200 * (1 - _appear) - 16 * _appearVelocity) * dt;
+        _appear = Math.Max(0, _appear + _appearVelocity * dt);
+
         // Breathing squash/stretch (volume-preserving) plus the reaction spring.
         var breath = 1 + Math.Sin(_bobPhase + Math.PI / 2) * 0.015 + Math.Clamp(_squash * 0.05, -0.08, 0.08);
-        BodyScale.ScaleY = breath;
-        BodyScale.ScaleX = 1 / breath;
+        BodyScale.ScaleY = breath * _appear;
+        BodyScale.ScaleX = _appear / breath;
 
         var lift = y + _hop;
         ShadowScale.ScaleX = ShadowScale.ScaleY = Math.Clamp(1 - lift / 40, 0.6, 1.2);
@@ -227,9 +253,34 @@ public partial class JarvisCharacter : UserControl
         LeftEyeScale.ScaleX = RightEyeScale.ScaleX = _eyeScale;
         LeftEyeScale.ScaleY = RightEyeScale.ScaleY = _eyeScale * eyeScaleY * _squint;
 
+        LeftEyeShine.Opacity = RightEyeShine.Opacity = eyeScaleY * _squint > 0.6 ? 1 : 0;
+
         var error = _state == AssistantState.Error;
-        Eyes.Opacity = Approach(Eyes.Opacity, error ? 0 : 1, dt * 8);
+        var happy = _state == AssistantState.Idle && t < _happyUntil;
+        Eyes.Opacity = Approach(Eyes.Opacity, error || happy ? 0 : 1, dt * 8);
         ErrorEyes.Opacity = Approach(ErrorEyes.Opacity, error ? 1 : 0, dt * 8);
+        HappyEyes.Opacity = Approach(HappyEyes.Opacity, happy ? 1 : 0, dt * 8);
+    }
+
+    private void AnimateListening(double t, double dt)
+    {
+        var listening = _state == AssistantState.Listening;
+        var level = Math.Clamp(_audioLevel * 9, 0, 1);
+
+        // Ears perk up and pulse with the microphone level.
+        _earScale = Damp(_earScale, listening ? 1.1 + level * 0.25 : 1, 14, dt);
+        LeftEarScale.ScaleX = RightEarScale.ScaleX = LeftEarScale.ScaleY = RightEarScale.ScaleY = _earScale;
+
+        // Two rings expanding outwards, half a cycle apart.
+        _rippleOpacity = Approach(_rippleOpacity, listening ? 1 : 0, dt * 3);
+        SetRipple(Ripple1, Ripple1Scale, t * 0.7 % 1);
+        SetRipple(Ripple2, Ripple2Scale, (t * 0.7 + 0.5) % 1);
+    }
+
+    private void SetRipple(Ellipse ring, ScaleTransform scale, double phase)
+    {
+        scale.ScaleX = scale.ScaleY = 0.85 + phase * 0.6;
+        ring.Opacity = _rippleOpacity * (1 - phase) * 0.55;
     }
 
     private void AnimateMouth(double t, double dt)
@@ -288,7 +339,7 @@ public partial class JarvisCharacter : UserControl
         _color = Lerp(_color, target, Math.Min(1, dt * 6));
         AntennaBrush.Color = AntennaGlow.Color = _color;
         LeftEyeBrush.Color = RightEyeBrush.Color = LeftEyeGlow.Color = RightEyeGlow.Color = _color;
-        SmileBrush.Color = OpenMouthBrush.Color = _color;
+        SmileBrush.Color = OpenMouthBrush.Color = HappyEyesBrush.Color = RippleBrush.Color = _color;
         foreach (var dot in new[] { OrbitDot1, OrbitDot2, OrbitDot3 })
         {
             ((SolidColorBrush)dot.Fill).Color = _color;
@@ -298,8 +349,10 @@ public partial class JarvisCharacter : UserControl
     private static readonly Geometry SmileMouth = Geometry.Parse("M74,110 Q85,118 96,110");
     private static readonly Geometry FlatMouth = Geometry.Parse("M76,112 Q85,111 94,112");
 
-    private static Color StateColor(AssistantState state) => state switch
+    /// <summary>Accent colour per state; shared with the tray icon so both always match.</summary>
+    internal static Color StateColor(AssistantState state) => state switch
     {
+        AssistantState.Speaking => Color.FromRgb(0x5A, 0xC8, 0xFF),
         AssistantState.Listening => Color.FromRgb(0xFF, 0x4D, 0x8D),
         AssistantState.Transcribing => Color.FromRgb(0xFF, 0xC8, 0x57),
         AssistantState.Thinking => Color.FromRgb(0xA0, 0x7C, 0xFF),

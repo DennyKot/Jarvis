@@ -26,6 +26,23 @@
             <Ellipse x:Name="OrbitDot3" Width="8" Height="8" Canvas.Left="-80" Canvas.Top="40" />
         </Canvas>
 
+        <!-- Listening ripples -->
+        <Ellipse x:Name="Ripple1" Canvas.Left="25" Canvas.Top="32" Width="120" Height="120" StrokeThickness="3" Opacity="0"
+                 RenderTransformOrigin="0.5,0.5" IsHitTestVisible="False">
+            <Ellipse.Stroke>
+                <SolidColorBrush x:Name="RippleBrush" Color="#FF4D8D" />
+            </Ellipse.Stroke>
+            <Ellipse.RenderTransform>
+                <ScaleTransform x:Name="Ripple1Scale" />
+            </Ellipse.RenderTransform>
+        </Ellipse>
+        <Ellipse x:Name="Ripple2" Canvas.Left="25" Canvas.Top="32" Width="120" Height="120" StrokeThickness="3" Opacity="0"
+                 Stroke="{Binding Stroke, ElementName=Ripple1}" RenderTransformOrigin="0.5,0.5" IsHitTestVisible="False">
+            <Ellipse.RenderTransform>
+                <ScaleTransform x:Name="Ripple2Scale" />
+            </Ellipse.RenderTransform>
+        </Ellipse>
+
         <Canvas x:Name="Body" Width="170" Height="170" RenderTransformOrigin="0.5,0.9">
             <Canvas.RenderTransform>
                 <TransformGroup>
@@ -35,36 +52,49 @@
                 </TransformGroup>
             </Canvas.RenderTransform>
 
-            <!-- Antenna -->
-            <Rectangle Canvas.Left="83" Canvas.Top="14" Width="4" Height="22" RadiusX="2" RadiusY="2" Fill="#9AA7D6" />
-            <Ellipse x:Name="AntennaBall" Canvas.Left="76" Canvas.Top="2" Width="18" Height="18" RenderTransformOrigin="0.5,0.5">
-                <Ellipse.Fill>
-                    <SolidColorBrush x:Name="AntennaBrush" Color="#00E5FF" />
-                </Ellipse.Fill>
-                <Ellipse.RenderTransform>
-                    <ScaleTransform x:Name="AntennaScale" />
-                </Ellipse.RenderTransform>
-                <Ellipse.Effect>
-                    <DropShadowEffect x:Name="AntennaGlow" Color="#00E5FF" BlurRadius="18" ShadowDepth="0" Opacity="1" />
-                </Ellipse.Effect>
-            </Ellipse>
+            <!-- Antenna (wobbles on its base with a spring) -->
+            <Canvas>
+                <Canvas.RenderTransform>
+                    <RotateTransform x:Name="AntennaRotate" CenterX="85" CenterY="36" />
+                </Canvas.RenderTransform>
+                <Rectangle Canvas.Left="83" Canvas.Top="14" Width="4" Height="22" RadiusX="2" RadiusY="2" Fill="#9AA7D6" />
+                <Ellipse x:Name="AntennaBall" Canvas.Left="76" Canvas.Top="2" Width="18" Height="18" RenderTransformOrigin="0.5,0.5">
+                    <Ellipse.Fill>
+                        <SolidColorBrush x:Name="AntennaBrush" Color="#00E5FF" />
+                    </Ellipse.Fill>
+                    <Ellipse.RenderTransform>
+                        <ScaleTransform x:Name="AntennaScale" />
+                    </Ellipse.RenderTransform>
+                    <Ellipse.Effect>
+                        <DropShadowEffect x:Name="AntennaGlow" Color="#00E5FF" BlurRadius="18" ShadowDepth="0" Opacity="1" />
+                    </Ellipse.Effect>
+                </Ellipse>
+            </Canvas>
 
             <!-- Ears -->
-            <Rectangle Canvas.Left="10" Canvas.Top="70" Width="18" Height="38" RadiusX="8" RadiusY="8" Stroke="#8F9BD8" StrokeThickness="2">
+            <Rectangle Canvas.Left="10" Canvas.Top="70" Width="18" Height="38" RadiusX="8" RadiusY="8" Stroke="#8F9BD8" StrokeThickness="2"
+                       RenderTransformOrigin="1,0.5">
                 <Rectangle.Fill>
                     <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
                         <GradientStop Color="#B8C2F0" Offset="0" />
                         <GradientStop Color="#E8ECFF" Offset="1" />
                     </LinearGradientBrush>
                 </Rectangle.Fill>
+                <Rectangle.RenderTransform>
+                    <ScaleTransform x:Name="LeftEarScale" />
+                </Rectangle.RenderTransform>
             </Rectangle>
-            <Rectangle Canvas.Left="142" Canvas.Top="70" Width="18" Height="38" RadiusX="8" RadiusY="8" Stroke="#8F9BD8" StrokeThickness="2">
+            <Rectangle Canvas.Left="142" Canvas.Top="70" Width="18" Height="38" RadiusX="8" RadiusY="8" Stroke="#8F9BD8" StrokeThickness="2"
+                       RenderTransformOrigin="0,0.5">
                 <Rectangle.Fill>
                     <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
                         <GradientStop Color="#E8ECFF" Offset="0" />
                         <GradientStop Color="#B8C2F0" Offset="1" />
                     </LinearGradientBrush>
                 </Rectangle.Fill>
+                <Rectangle.RenderTransform>
+                    <ScaleTransform x:Name="RightEarScale" />
+                </Rectangle.RenderTransform>
             </Rectangle>
 
             <!-- Head -->
@@ -129,7 +159,16 @@
                         <DropShadowEffect x:Name="RightEyeGlow" Color="#00E5FF" BlurRadius="12" ShadowDepth="0" />
                     </Rectangle.Effect>
                 </Rectangle>
+                <Ellipse x:Name="LeftEyeShine" Canvas.Left="61" Canvas.Top="79" Width="5" Height="5" Fill="#D9FFFFFF" />
+                <Ellipse x:Name="RightEyeShine" Canvas.Left="99" Canvas.Top="79" Width="5" Height="5" Fill="#D9FFFFFF" />
             </Canvas>
+            <!-- Happy "^ ^" eyes shown briefly when a task finishes -->
+            <Path x:Name="HappyEyes" Opacity="0" StrokeThickness="5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                  Data="M58,93 Q66,78 74,93 M96,93 Q104,78 112,93">
+                <Path.Stroke>
+                    <SolidColorBrush x:Name="HappyEyesBrush" Color="#00E5FF" />
+                </Path.Stroke>
+            </Path>
             <Path x:Name="ErrorEyes" Opacity="0" Stroke="#FF4D4D" StrokeThickness="4" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                   Data="M59,80 L73,96 M73,80 L59,96 M97,80 L111,96 M111,80 L97,96" />
 

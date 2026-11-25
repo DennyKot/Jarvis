@@ -3,6 +3,7 @@
     <OutputType>WinExe</OutputType>
     <UseWPF>true</UseWPF>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\jarvis.ico</ApplicationIcon>
     <UserSecretsId>jarvis-assistant-6f1c2e0a</UserSecretsId>
     <AssemblyName>Jarvis</AssemblyName>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>

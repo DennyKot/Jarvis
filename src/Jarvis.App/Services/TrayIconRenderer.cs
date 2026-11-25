@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using Jarvis.App.Controls;
 using Jarvis.Core.Agent;
 using DrawingIcon = System.Drawing.Icon;
 
@@ -34,34 +35,41 @@ internal static class TrayIconRenderer
 
     private static BitmapSource Draw(AssistantState state)
     {
-        var accent = AccentFor(state);
+        // Big, bold shapes that fill the canvas: the tray shows this at 16-32 px, so thin details just turn to mush.
+        var accent = JarvisCharacter.StateColor(state);
         var accentBrush = Frozen(new SolidColorBrush(accent));
-        var glowBrush = Frozen(new RadialGradientBrush(Color.FromArgb(0xC0, accent.R, accent.G, accent.B), Color.FromArgb(0, accent.R, accent.G, accent.B)));
-        var shell = Frozen(new LinearGradientBrush(Color.FromRgb(0xE8, 0xEE, 0xFF), Color.FromRgb(0x9A, 0xA8, 0xD0), 90));
-        var outline = Frozen(new Pen(Frozen(new SolidColorBrush(Color.FromRgb(0x16, 0x1A, 0x35))), 3));
-        var visor = Frozen(new SolidColorBrush(Color.FromRgb(0x16, 0x1A, 0x35)));
+        var glowBrush = Frozen(new RadialGradientBrush(Color.FromArgb(0xB0, accent.R, accent.G, accent.B), Color.FromArgb(0, accent.R, accent.G, accent.B)));
+        var shell = Frozen(new LinearGradientBrush(Color.FromRgb(0xFF, 0xFF, 0xFF), Color.FromRgb(0xA9, 0xB6, 0xF0), 90));
+        var dark = Frozen(new SolidColorBrush(Color.FromRgb(0x16, 0x1A, 0x35)));
+        var outline = Frozen(new Pen(dark, 2.5));
+        var visor = Frozen(new LinearGradientBrush(Color.FromRgb(0x23, 0x2A, 0x55), Color.FromRgb(0x10, 0x13, 0x2B), 90));
 
         var visual = new DrawingVisual();
         using (var dc = visual.RenderOpen())
         {
             // Antenna
-            dc.DrawLine(outline, new Point(32, 14), new Point(32, 5));
-            dc.DrawEllipse(glowBrush, null, new Point(32, 6), 8, 8);
-            dc.DrawEllipse(accentBrush, outline, new Point(32, 6), 4.5, 4.5);
+            dc.DrawLine(Frozen(new Pen(dark, 4)), new Point(32, 14), new Point(32, 8));
+            dc.DrawEllipse(accentBrush, outline, new Point(32, 7), 5.5, 5.5);
 
-            // Ears
-            dc.DrawRoundedRectangle(shell, outline, new Rect(2, 28, 8, 18), 3, 3);
-            dc.DrawRoundedRectangle(shell, outline, new Rect(54, 28, 8, 18), 3, 3);
+            // Head + face screen
+            dc.DrawRoundedRectangle(shell, outline, new Rect(2.5, 13, 59, 49), 19, 19);
+            dc.DrawRoundedRectangle(visor, null, new Rect(8, 21, 48, 33), 14, 14);
 
-            // Head + visor
-            dc.DrawRoundedRectangle(shell, outline, new Rect(8, 14, 48, 46), 14, 14);
-            dc.DrawRoundedRectangle(visor, null, new Rect(14, 24, 36, 22), 10, 10);
-
-            // Eyes
-            foreach (var x in new[] { 24.0, 40.0 })
+            // Eyes (crosses on error, like the avatar)
+            foreach (var x in new[] { 21.5, 42.5 })
             {
-                dc.DrawEllipse(glowBrush, null, new Point(x, 35), 9, 9);
-                dc.DrawEllipse(accentBrush, null, new Point(x, 35), 4.5, 5.5);
+                dc.DrawEllipse(glowBrush, null, new Point(x, 37.5), 13, 13);
+                if (state == AssistantState.Error)
+                {
+                    var cross = Frozen(new Pen(accentBrush, 5) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round });
+                    dc.DrawLine(cross, new Point(x - 5.5, 31), new Point(x + 5.5, 44));
+                    dc.DrawLine(cross, new Point(x + 5.5, 31), new Point(x - 5.5, 44));
+                }
+                else
+                {
+                    dc.DrawRoundedRectangle(accentBrush, null, new Rect(x - 6, 28.5, 12, 18), 6, 6);
+                    dc.DrawEllipse(Brushes.White, null, new Point(x - 2, 33), 2, 2);
+                }
             }
         }
 
@@ -76,17 +84,6 @@ internal static class TrayIconRenderer
         AssistantState.Idle => "Jarvis — ready (click to talk)",
         AssistantState.Error => "Jarvis — error (see log)",
         _ => $"Jarvis — {state.ToString().ToLowerInvariant()}…",
-    };
-
-    private static Color AccentFor(AssistantState state) => state switch
-    {
-        AssistantState.Listening => Color.FromRgb(0x3D, 0xFF, 0x8A),
-        AssistantState.Transcribing or AssistantState.Thinking => Color.FromRgb(0xA0, 0x7C, 0xFF),
-        AssistantState.Acting => Color.FromRgb(0xFF, 0xB1, 0x3D),
-        AssistantState.Confirming => Color.FromRgb(0xFF, 0xE0, 0x3D),
-        AssistantState.Speaking => Color.FromRgb(0x5A, 0xC8, 0xFF),
-        AssistantState.Error => Color.FromRgb(0xFF, 0x4D, 0x5E),
-        _ => Color.FromRgb(0x00, 0xE5, 0xFF),
     };
 
     private static T Frozen<T>(T freezable) where T : Freezable
