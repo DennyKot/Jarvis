@@ -252,17 +252,7 @@ public sealed class ExtensionBrowserToolProvider(
     {
         var json = await bridge.SendAsync("snapshot", new { limit = Options.SnapshotElementLimit, textBudget = 1500 }, cancellationToken);
         var builder = new StringBuilder();
-        if (header is not null)
-        {
-            builder.AppendLine(header + ".");
-        }
-
-        var url = json.GetProperty("url").GetString() ?? string.Empty;
-        builder.Append("Page: ").Append(json.GetProperty("title").GetString()).Append(" — ").AppendLine(url);
-        builder.Append("Scroll: ").Append(json.GetProperty("scrollY").GetInt32())
-            .Append('/').Append(json.GetProperty("scrollHeight").GetInt32())
-            .Append(" (viewport ").Append(json.GetProperty("viewportHeight").GetInt32()).AppendLine(")");
-        var lines = json.GetProperty("lines").EnumerateArray().Select(l => l.GetString() ?? string.Empty).ToList();
+        var (url, lines) = BrowserToolProvider.AppendPageHeader(builder, header, json);
 
         var tabId = json.GetProperty("tabId").GetInt32();
         var diff = !full && _snapshots.TryGetValue(tabId, out var previous) && previous.Url == url

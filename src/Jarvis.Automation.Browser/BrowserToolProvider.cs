@@ -387,17 +387,7 @@ public sealed class BrowserToolProvider(
             new { limit = Options.SnapshotElementLimit, textBudget = 1500 });
 
         var builder = new StringBuilder();
-        if (header is not null)
-        {
-            builder.AppendLine(header + ".");
-        }
-
-        var url = json.GetProperty("url").GetString() ?? string.Empty;
-        builder.Append("Page: ").Append(json.GetProperty("title").GetString()).Append(" — ").AppendLine(url);
-        builder.Append("Scroll: ").Append(json.GetProperty("scrollY").GetInt32())
-            .Append('/').Append(json.GetProperty("scrollHeight").GetInt32())
-            .Append(" (viewport ").Append(json.GetProperty("viewportHeight").GetInt32()).AppendLine(")");
-        var lines = json.GetProperty("lines").EnumerateArray().Select(l => l.GetString() ?? string.Empty).ToList();
+        var (url, lines) = AppendPageHeader(builder, header, json);
 
         var diff = !full && _snapshots.TryGetValue(page, out var previous) && previous.Url == url
             ? SnapshotDiff.Describe(previous.Lines, lines)
@@ -411,6 +401,22 @@ public sealed class BrowserToolProvider(
 
         var excerpt = withExcerpt ? await page.EvaluateAsync<string>(PageScripts.ReadText, NavigationExcerptLength) : null;
         return AppendSnapshot(builder, lines, json.GetProperty("truncated").GetBoolean(), excerpt).ToString();
+    }
+
+    /// <summary>Writes the header, page title/URL and scroll position of a snapshot; returns its URL and lines.</summary>
+    internal static (string Url, List<string> Lines) AppendPageHeader(StringBuilder builder, string? header, JsonElement json)
+    {
+        if (header is not null)
+        {
+            builder.AppendLine(header + ".");
+        }
+
+        var url = json.GetProperty("url").GetString() ?? string.Empty;
+        builder.Append("Page: ").Append(json.GetProperty("title").GetString()).Append(" — ").AppendLine(url);
+        builder.Append("Scroll: ").Append(json.GetProperty("scrollY").GetInt32())
+            .Append('/').Append(json.GetProperty("scrollHeight").GetInt32())
+            .Append(" (viewport ").Append(json.GetProperty("viewportHeight").GetInt32()).AppendLine(")");
+        return (url, json.GetProperty("lines").EnumerateArray().Select(l => l.GetString() ?? string.Empty).ToList());
     }
 
     /// <summary>
