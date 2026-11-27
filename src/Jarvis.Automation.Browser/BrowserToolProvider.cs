@@ -360,7 +360,6 @@ public sealed class BrowserToolProvider(
         }
     }
 
-    /// <summary>Current value of an input, textarea or select; null for other elements.</summary>
     private static async Task<string?> TryGetValueAsync(ILocator locator)
     {
         try
@@ -403,7 +402,6 @@ public sealed class BrowserToolProvider(
         return AppendSnapshot(builder, lines, json.GetProperty("truncated").GetBoolean(), excerpt).ToString();
     }
 
-    /// <summary>Writes the header, page title/URL and scroll position of a snapshot; returns its URL and lines.</summary>
     internal static (string Url, List<string> Lines) AppendPageHeader(StringBuilder builder, string? header, JsonElement json)
     {
         if (header is not null)

@@ -335,7 +335,6 @@ public sealed class AgentRunner : IAgentRunner
         return changed && _options.Llm.DynamicTools;
     }
 
-    /// <summary>Streams the response so a final answer shows up in the bubble while it is still being generated.</summary>
     private async Task<ChatResponse> GetStreamedResponseAsync(List<ChatMessage> messages, ChatOptions chatOptions, CancellationToken cancellationToken)
     {
         var updates = new List<ChatResponseUpdate>();

@@ -1,6 +1,5 @@
 namespace Jarvis.Core.Tools;
 
-/// <summary>A rectangle in physical screen pixels (virtual-screen coordinates).</summary>
 public readonly record struct ScreenRect(double X, double Y, double Width, double Height)
 {
     public double CenterX => X + Width / 2;

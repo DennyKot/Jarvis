@@ -6,7 +6,6 @@ using Jarvis.Core.Agent;
 
 namespace Jarvis.App.Controls;
 
-/// <summary>Procedurally animated robot character. Everything is driven per frame from <see cref="State"/>.</summary>
 public partial class JarvisCharacter : UserControl
 {
     private readonly Rectangle[] _bars;
@@ -83,7 +82,6 @@ public partial class JarvisCharacter : UserControl
         }
     }
 
-    /// <summary>Microphone level (RMS, 0..~0.3) for the listening equalizer.</summary>
     public float AudioLevel
     {
         set => _audioLevel = Math.Max(_audioLevel * 0.6, value);

@@ -4,7 +4,6 @@ using Microsoft.Extensions.Logging;
 
 namespace Jarvis.App.Views;
 
-/// <summary>First-run window that installs Ollama and pulls the configured model (checked by default).</summary>
 public partial class SetupWindow : Window
 {
     private readonly OllamaSetup _setup;

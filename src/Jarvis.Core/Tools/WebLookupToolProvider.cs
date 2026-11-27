@@ -96,7 +96,6 @@ public sealed partial class WebLookupToolProvider(
         return FormatArticle(title, pageUrl, extract, query, options.Value.Browser.ReadTextLimit);
     }
 
-    /// <summary>The intro paragraph plus the paragraphs that match the query.</summary>
     internal static string FormatArticle(string? title, string? url, string extract, string query, int limit)
     {
         var text = SectionHeadingRegex().Replace(extract, "\n");

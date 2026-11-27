@@ -5,7 +5,6 @@ using Microsoft.Extensions.Options;
 
 namespace Jarvis.Voice;
 
-/// <summary>Detects a wake phrase at the start of a transcript and returns the command that follows it.</summary>
 public static partial class WakeWordMatcher
 {
     [GeneratedRegex(@"[\p{L}\p{N}]+")]

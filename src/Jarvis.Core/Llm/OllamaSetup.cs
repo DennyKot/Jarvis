@@ -22,7 +22,6 @@ public sealed class OllamaSetup(IOptions<JarvisOptions> options, ILogger<OllamaS
 
     private bool IsLocalEndpoint => Endpoint.IsLoopback;
 
-    /// <summary>True when the server answers and the configured model is already pulled.</summary>
     public async Task<bool> IsReadyAsync(CancellationToken ct = default)
     {
         try

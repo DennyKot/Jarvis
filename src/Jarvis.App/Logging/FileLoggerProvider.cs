@@ -4,7 +4,6 @@ using Microsoft.Extensions.Logging;
 
 namespace Jarvis.App.Logging;
 
-/// <summary>Minimal daily-rolling file logger: %LOCALAPPDATA%\Jarvis\logs\jarvis-yyyyMMdd.log.</summary>
 public sealed class FileLoggerProvider : ILoggerProvider
 {
     private readonly string _directory;

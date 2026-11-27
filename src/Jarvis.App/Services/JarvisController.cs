@@ -15,7 +15,6 @@ using Microsoft.Extensions.Options;
 
 namespace Jarvis.App.Services;
 
-/// <summary>Glues hotkeys, voice, the agent and the UI together.</summary>
 public sealed class JarvisController(
     AvatarWindow avatar,
     PointerService pointer,

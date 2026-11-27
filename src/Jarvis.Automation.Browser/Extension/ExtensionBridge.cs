@@ -10,7 +10,6 @@ using Microsoft.Extensions.Options;
 
 namespace Jarvis.Automation.Browser.Extension;
 
-/// <summary>Local WebSocket server that the Jarvis Bridge Chrome extension connects to.</summary>
 public sealed class ExtensionBridge : IAsyncDisposable
 {
     private readonly ILogger<ExtensionBridge> _logger;
@@ -43,7 +42,6 @@ public sealed class ExtensionBridge : IAsyncDisposable
 
     public bool IsConnected => _socket is { State: WebSocketState.Open };
 
-    /// <summary>True once the extension has connected at least once, i.e. it is installed in Chrome.</summary>
     public bool WasEverConnected => _markerPath is not null && File.Exists(_markerPath);
 
     public void Start()

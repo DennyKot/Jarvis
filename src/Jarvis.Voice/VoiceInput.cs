@@ -5,14 +5,12 @@ using Microsoft.Extensions.Options;
 
 namespace Jarvis.Voice;
 
-/// <summary>Push-to-talk voice input: record one utterance, then transcribe it.</summary>
 public sealed class VoiceInput(AudioRecorder recorder, ISpeechTranscriber transcriber, AssistantStatus status)
 {
     private CancellationTokenSource? _stop;
 
     public bool IsListening => _stop is not null;
 
-    /// <summary>Ends the current recording early (pressing the talk hotkey again).</summary>
     public void StopListening() => _stop?.Cancel();
 
     public async Task<Transcript> ListenAsync(CancellationToken cancellationToken)

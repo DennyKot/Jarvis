@@ -5,7 +5,6 @@ using Jarvis.Core.Tools;
 
 namespace Jarvis.App.Services;
 
-/// <summary>Thread-safe bridge from automation tools to the pointer overlay on the UI thread.</summary>
 public sealed class PointerService(PointerOverlayWindow overlay) : IPointerService
 {
     public event Action<ScreenRect>? Pointing;

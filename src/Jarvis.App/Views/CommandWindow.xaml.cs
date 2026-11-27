@@ -3,7 +3,6 @@ using System.Windows.Input;
 
 namespace Jarvis.App.Views;
 
-/// <summary>Type a command instead of speaking it. Enter sends, Esc closes.</summary>
 public partial class CommandWindow : Window
 {
     public CommandWindow(string? initialText = null)

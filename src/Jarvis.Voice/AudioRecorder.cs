@@ -5,7 +5,6 @@ using NAudio.Wave;
 
 namespace Jarvis.Voice;
 
-/// <summary>Records 16 kHz mono audio until silence, a timeout, or an explicit stop.</summary>
 public sealed class AudioRecorder(IOptions<JarvisOptions> options, ILogger<AudioRecorder> logger)
 {
     public const int SampleRate = 16000;
@@ -13,7 +12,6 @@ public sealed class AudioRecorder(IOptions<JarvisOptions> options, ILogger<Audio
 
     public event Action<float>? LevelChanged;
 
-    /// <summary>Raised when the first audio buffer arrives (opening the device can take a second).</summary>
     public event Action? Started;
 
     /// <returns>Samples in [-1, 1], or an empty array when no speech was detected.</returns>
@@ -88,7 +86,6 @@ public sealed class AudioRecorder(IOptions<JarvisOptions> options, ILogger<Audio
     }
 }
 
-/// <summary>Energy-based end-of-utterance detection.</summary>
 public sealed class SpeechEndDetector(float threshold, TimeSpan silenceTimeout, TimeSpan noSpeechTimeout)
 {
     private TimeSpan _elapsed;

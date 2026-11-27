@@ -49,7 +49,6 @@ public sealed record ExtensionIdentity(string PublicKey, string Id, string Token
     }
 }
 
-/// <summary>Writes the unpacked extension (manifest, service worker, config and page scripts) to disk.</summary>
 public static class ExtensionFiles
 {
     public static string Write(ExtensionIdentity identity, int port, string directory)

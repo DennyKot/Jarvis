@@ -4,7 +4,6 @@ namespace Jarvis.Core.Agent;
 
 internal enum ToolGroup
 {
-    /// <summary>Always sent: entry points into the web and desktop groups.</summary>
     Core,
     Web,
     Desktop,

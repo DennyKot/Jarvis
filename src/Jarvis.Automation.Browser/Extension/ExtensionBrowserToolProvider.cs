@@ -9,7 +9,6 @@ using Microsoft.Extensions.Options;
 
 namespace Jarvis.Automation.Browser.Extension;
 
-/// <summary>browser_* tools that operate the user's own Chrome through the Jarvis Bridge extension.</summary>
 public sealed class ExtensionBrowserToolProvider(
     ExtensionBridge bridge,
     ChromeExtensionInstaller installer,

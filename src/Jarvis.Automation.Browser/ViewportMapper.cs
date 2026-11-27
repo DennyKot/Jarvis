@@ -2,7 +2,6 @@ using Jarvis.Core.Tools;
 
 namespace Jarvis.Automation.Browser;
 
-/// <summary>Viewport metrics reported by the page (CSS pixels).</summary>
 public readonly record struct ViewportMetrics(double InnerWidth, double InnerHeight, double DevicePixelRatio);
 
 /// <summary>Converts element boxes inside a Chrome tab into physical screen pixels for the AI pointer.</summary>

@@ -11,7 +11,6 @@ using Microsoft.Extensions.Options;
 
 namespace Jarvis.App.Views;
 
-/// <summary>Full-screen, click-through layer that draws Jarvis' own animated cursor.</summary>
 public partial class PointerOverlayWindow : Window
 {
     private const int TrailLength = 14;
@@ -48,7 +47,6 @@ public partial class PointerOverlayWindow : Window
         CompositionTarget.Rendering += OnRendering;
     }
 
-    /// <summary>Where the pointer appears from when it was hidden (the avatar), in physical pixels.</summary>
     public Point HomePhysical { get; set; }
 
     public Task AnimateAsync(ScreenRect target, PointerAction action, string? label)

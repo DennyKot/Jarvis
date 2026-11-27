@@ -8,7 +8,6 @@ using DrawingIcon = System.Drawing.Icon;
 
 namespace Jarvis.App.Services;
 
-/// <summary>Draws the tray icon: a small robot head whose eyes/antenna glow in a per-state accent colour.</summary>
 internal static class TrayIconRenderer
 {
     private const int Size = 64;

@@ -11,7 +11,6 @@ public enum MouseButton
     Right,
 }
 
-/// <summary>Synthesizes real keyboard and mouse input with SendInput.</summary>
 public sealed class InputSimulator
 {
     private static readonly int InputSize = Marshal.SizeOf<INPUT>();

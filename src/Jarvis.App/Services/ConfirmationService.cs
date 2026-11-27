@@ -4,7 +4,6 @@ using Jarvis.Core.Safety;
 
 namespace Jarvis.App.Services;
 
-/// <summary>Shows a confirmation card next to the avatar and waits for Allow / Deny.</summary>
 public sealed class ConfirmationService(AvatarWindow avatar) : IConfirmationService
 {
     public async Task<bool> ConfirmAsync(ConfirmationRequest request, CancellationToken cancellationToken)

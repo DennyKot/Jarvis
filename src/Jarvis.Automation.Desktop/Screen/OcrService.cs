@@ -9,7 +9,6 @@ namespace Jarvis.Automation.Desktop.Screen;
 
 public sealed record OcrLine(string Text, ScreenRect Bounds);
 
-/// <summary>Reads text from the screen with the built-in Windows OCR engine.</summary>
 public sealed class OcrService
 {
     public static IReadOnlyList<string> AvailableLanguages =>

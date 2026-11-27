@@ -39,7 +39,6 @@ public sealed class AssistantStatus
 
     public void PostAssistantMessage(string text) => MessagePosted?.Invoke(text, false);
 
-    /// <summary>Raised with the reply text received so far while the final answer streams in.</summary>
     public event Action<string>? ReplyStreamed;
 
     public void StreamReply(string textSoFar) => ReplyStreamed?.Invoke(textSoFar);

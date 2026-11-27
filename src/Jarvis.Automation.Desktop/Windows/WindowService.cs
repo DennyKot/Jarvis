@@ -53,7 +53,6 @@ public sealed class WindowService(InputSimulator input) : IWindowActivator
         return windows;
     }
 
-    /// <summary>Finds the best window whose title or process name matches <paramref name="query"/>.</summary>
     public WindowInfo? FindWindow(string query)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(query);

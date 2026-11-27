@@ -8,7 +8,6 @@ using Microsoft.Win32;
 
 namespace Jarvis.Automation.Browser;
 
-/// <summary>Owns the connection to the user's Google Chrome over the DevTools protocol.</summary>
 public sealed class ChromeSession(IOptions<JarvisOptions> options, ILogger<ChromeSession> logger) : IAsyncDisposable
 {
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(2) };

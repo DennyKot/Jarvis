@@ -5,7 +5,6 @@ using Microsoft.Extensions.Logging;
 
 namespace Jarvis.App.Services;
 
-/// <summary>System-wide hotkeys registered on a message-only window.</summary>
 public sealed class GlobalHotkeys : IDisposable
 {
     private readonly ILogger<GlobalHotkeys> _logger;

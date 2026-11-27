@@ -70,7 +70,6 @@ public partial class AvatarWindow : Window
     public event Action? LogsRequested;
     public event Action? ExitRequested;
 
-    /// <summary>Center of the character in physical screen pixels (where the AI pointer is "launched" from).</summary>
     public Point CharacterCenterPhysical
     {
         get

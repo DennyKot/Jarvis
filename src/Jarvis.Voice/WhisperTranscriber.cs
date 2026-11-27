@@ -8,7 +8,6 @@ using Whisper.net.Ggml;
 
 namespace Jarvis.Voice;
 
-/// <summary>Local, offline speech-to-text with Whisper.net. Downloads the model on first use.</summary>
 public sealed class WhisperTranscriber(
     IOptions<JarvisOptions> options,
     AssistantStatus status,

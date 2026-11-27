@@ -109,7 +109,6 @@ public sealed class VoiceOptions
     public float SilenceThreshold { get; set; } = 0.015f;
     public string? ModelDirectory { get; set; }
 
-    /// <summary>Listen in the background for a wake phrase ("Hey Jarvis") as an alternative to the talk hotkey.</summary>
     public bool WakeWordEnabled { get; set; }
 
     /// <summary>Phrases that wake Jarvis when an utterance starts with them (case/punctuation-insensitive).</summary>
