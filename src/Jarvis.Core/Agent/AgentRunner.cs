@@ -276,27 +276,33 @@ public sealed class AgentRunner : IAgentRunner
                 chatOptions.Tools = VisibleTools();
             }
 
-            var images = _observations.Drain();
-            if (images.Count > 0)
-            {
-                // A screenshot costs ~1k+ tokens on every later step; only the newest one is useful.
-                RemoveImages(messages);
-                var contents = new List<AIContent>();
-                foreach (var image in images)
-                {
-                    contents.Add(new TextContent(image.Caption));
-                    contents.Add(new DataContent(image.Data, image.MediaType));
-                }
-
-                var observation = new ChatMessage(ChatRole.User, contents)
-                {
-                    AdditionalProperties = new() { [ObservationMarker] = true },
-                };
-                messages.Add(observation);
-            }
+            AddObservations(messages);
         }
 
         return $"I stopped after {_options.Llm.MaxSteps} steps without finishing. Tell me how to continue.";
+    }
+
+    private void AddObservations(List<ChatMessage> messages)
+    {
+        var images = _observations.Drain();
+        if (images.Count == 0)
+        {
+            return;
+        }
+
+        // A screenshot costs ~1k+ tokens on every later step; only the newest one is useful.
+        RemoveImages(messages);
+        var contents = new List<AIContent>();
+        foreach (var image in images)
+        {
+            contents.Add(new TextContent(image.Caption));
+            contents.Add(new DataContent(image.Data, image.MediaType));
+        }
+
+        messages.Add(new ChatMessage(ChatRole.User, contents)
+        {
+            AdditionalProperties = new() { [ObservationMarker] = true },
+        });
     }
 
     /// <summary>Tools sent to the model; kept in a stable order so the prompt prefix stays cacheable.</summary>
